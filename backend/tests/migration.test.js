@@ -166,7 +166,7 @@ describe("migration 002-conversations", () => {
     expect((await users.findOne({})).password).toBeDefined();
 
     const first = await runMigrations();
-    expect(first.map((r) => r.id)).toEqual(["001-users", "002-conversations"]);
+    expect(first.map((r) => r.id)).toEqual(["001-users", "002-conversations", "003-attachments"]);
     expect((await users.findOne({})).passwordHash).toBeDefined();
 
     expect(await runMigrations()).toEqual([]);

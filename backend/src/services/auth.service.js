@@ -1,17 +1,22 @@
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
 import * as zxcvbnCommon from "@zxcvbn-ts/language-common";
 import { ERROR_CODES, SOCKET_EVENTS, USER_STATUS } from "@ghosted/shared";
+import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { sessionOptions, withTransaction } from "../config/db.js";
 import User from "../models/user.model.js";
 import Session from "../models/session.model.js";
 import Message from "../models/message.model.js";
 import Conversation from "../models/conversation.model.js";
+import Block from "../models/block.model.js";
+import EmailToken from "../models/emailToken.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { initialsAvatar } from "../utils/avatar.js";
 import * as tokens from "./token.service.js";
 import * as media from "./media.service.js";
+import * as mail from "./mail.service.js";
 import { broadcast, disconnectUserSockets } from "../sockets/emit.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -19,6 +24,8 @@ const MAX_FAILED_LOGINS = 5;
 const LOCK_BASE_MS = 15 * 60 * 1000;
 const LOCK_MAX_MS = 60 * 60 * 1000;
 const MIN_PASSWORD_SCORE = 2;
+const VERIFY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
 // Compared against when the username does not exist, so a miss costs the same time as a hit
 const DUMMY_HASH = bcrypt.hashSync("ghosted-timing-equalizer", BCRYPT_ROUNDS);
@@ -196,10 +203,13 @@ export async function deleteAccount(user, { password }) {
     type: "direct",
     "participants.userId": userId,
   });
-  const imageIds = await Message.distinct("attachments.publicId", {
+  const messages = await Message.find({
     $or: [{ conversationId: { $in: conversationIds } }, { senderId: userId }],
-    "attachments.publicId": { $ne: null },
-  });
+    "attachments.0": { $exists: true },
+  })
+    .select("attachments.publicId attachments.resourceType")
+    .lean();
+  const assets = messages.flatMap((m) => m.attachments);
 
   await withTransaction(async (session) => {
     const opts = sessionOptions(session);
@@ -208,6 +218,8 @@ export async function deleteAccount(user, { password }) {
       opts
     );
     await Conversation.deleteMany({ _id: { $in: conversationIds } }, opts);
+    await Block.deleteMany({ $or: [{ blockerId: userId }, { blockedId: userId }] }, opts);
+    await EmailToken.deleteMany({ userId }, opts);
     await Session.deleteMany({ userId }, opts);
     await User.deleteOne({ _id: userId }, opts);
   });
@@ -218,10 +230,130 @@ export async function deleteAccount(user, { password }) {
     conversationIds: conversationIds.map(String),
   });
   logger.info(
-    { userId: String(userId), conversations: conversationIds.length, images: imageIds.length },
+    { userId: String(userId), conversations: conversationIds.length, assets: assets.length },
     "Account deleted"
   );
 
   // Best-effort media cleanup after the data is gone; failures only leave orphaned assets
-  void media.destroyImages([doc.avatar?.publicId, ...imageIds]);
+  void media.destroyAssets([{ publicId: doc.avatar?.publicId, resourceType: "image" }, ...assets]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Email verification and password reset (only active when SMTP is configured)
+// ---------------------------------------------------------------------------------------------
+
+const hashToken = (raw) => crypto.createHash("sha256").update(raw).digest("hex");
+
+async function issueEmailToken(user, purpose, ttlMs) {
+  const raw = crypto.randomBytes(32).toString("hex");
+  await EmailToken.deleteMany({ userId: user._id, purpose });
+  await EmailToken.create({
+    userId: user._id,
+    purpose,
+    email: user.email,
+    tokenHash: hashToken(raw),
+    expiresAt: new Date(Date.now() + ttlMs),
+  });
+  return raw;
+}
+
+export async function sendVerification(user) {
+  mail.assertEmailConfigured();
+  if (!user.email) throw ApiError.badRequest("Add an email address first");
+  if (user.emailVerified) throw ApiError.badRequest("This email address is already verified");
+  const raw = await issueEmailToken(user, "verify", VERIFY_TOKEN_TTL_MS);
+  await mail.sendMail({
+    to: user.email,
+    ...mail.verificationEmail({
+      fullname: user.fullname,
+      link: `${env.appUrl}/verify-email?token=${raw}`,
+    }),
+  });
+}
+
+export async function updateEmail(user, email) {
+  if (await User.exists({ email, _id: { $ne: user._id } })) {
+    throw ApiError.conflict("That email address is already in use");
+  }
+  if (user.email === email && user.emailVerified) return user;
+  user.email = email;
+  user.emailVerified = false;
+  await user.save();
+  if (mail.emailConfigured) {
+    try {
+      await sendVerification(user);
+    } catch (err) {
+      logger.warn({ err, userId: String(user._id) }, "Verification email failed");
+    }
+  }
+  return user;
+}
+
+export async function removeEmail(user) {
+  user.email = undefined;
+  user.emailVerified = false;
+  await user.save();
+  await EmailToken.deleteMany({ userId: user._id });
+  return user;
+}
+
+export async function verifyEmail(rawToken) {
+  const doc = await EmailToken.findOne({
+    tokenHash: hashToken(rawToken),
+    purpose: "verify",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!doc) throw ApiError.badRequest("This verification link is invalid or has expired");
+  const user = await User.findById(doc.userId);
+  if (!user || user.email !== doc.email) {
+    throw ApiError.badRequest("This verification link is no longer valid");
+  }
+  user.emailVerified = true;
+  await user.save();
+  await EmailToken.deleteOne({ _id: doc._id });
+  return user;
+}
+
+/** Always resolves, whether or not the account exists, so addresses cannot be enumerated. */
+export async function forgotPassword(identifier) {
+  mail.assertEmailConfigured();
+  const key = identifier.toLowerCase();
+  const user = await User.findOne(key.includes("@") ? { email: key } : { username: key });
+  if (!user || !user.email || !user.emailVerified || user.status !== USER_STATUS.ACTIVE) {
+    logger.info("Password reset requested for an unknown or unverified account");
+    return;
+  }
+  const raw = await issueEmailToken(user, "reset", RESET_TOKEN_TTL_MS);
+  await mail.sendMail({
+    to: user.email,
+    ...mail.resetEmail({
+      fullname: user.fullname,
+      link: `${env.appUrl}/reset-password?token=${raw}`,
+    }),
+  });
+}
+
+export async function resetPassword(rawToken, password) {
+  const doc = await EmailToken.findOne({
+    tokenHash: hashToken(rawToken),
+    purpose: "reset",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!doc) throw ApiError.badRequest("This reset link is invalid or has expired");
+  const user = await User.findById(doc.userId).select("+passwordHash");
+  if (!user) throw ApiError.badRequest("This reset link is no longer valid");
+  assertPasswordStrength(password, [user.username, user.fullname]);
+  user.passwordHash = await hashPassword(password);
+  user.passwordChangedAt = new Date();
+  user.failedLoginCount = 0;
+  user.lockedUntil = null;
+  await user.save();
+  await EmailToken.deleteMany({ userId: user._id, purpose: "reset" });
+  await tokens.revokeAllSessions(user._id, "password_reset");
+  await disconnectUserSockets(user._id, {
+    event: SOCKET_EVENTS.SESSION_REVOKED,
+    payload: { reason: "password_change" },
+  });
+  logger.info({ userId: String(user._id) }, "Password reset via email");
+  return user;
 }

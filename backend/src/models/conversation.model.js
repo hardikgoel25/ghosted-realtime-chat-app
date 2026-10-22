@@ -27,6 +27,7 @@ const lastMessageSchema = new Schema(
     type: { type: String, enum: MESSAGE_TYPES, default: "text" },
     text: { type: String, default: "" },
     hasAttachments: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
     createdAt: { type: Date, required: true },
   },
   { _id: false }

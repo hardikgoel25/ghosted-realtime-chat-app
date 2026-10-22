@@ -54,25 +54,46 @@ export function serializeUser(user, { self = false } = {}) {
   return base;
 }
 
+function serializeAttachment(a) {
+  return {
+    kind: a.kind ?? "image",
+    url: a.url,
+    mime: a.mime ?? null,
+    size: a.size ?? null,
+    width: a.width ?? null,
+    height: a.height ?? null,
+    durationMs: a.durationMs ?? null,
+    name: a.name ?? null,
+  };
+}
+
 export function serializeMessage(message) {
   const m = plain(message);
   if (!m) return null;
+  const deleted = Boolean(m.deletedAt);
   return {
     _id: String(m._id),
     conversationId: String(m.conversationId),
     senderId: String(m.senderId),
     clientId: m.clientId ?? null,
     type: m.type ?? "text",
-    text: m.text ?? "",
-    attachments: (m.attachments ?? []).map((a) => ({
-      url: a.url,
-      mime: a.mime ?? null,
-      size: a.size ?? null,
-      width: a.width ?? null,
-      height: a.height ?? null,
-      name: a.name ?? null,
-    })),
-    replyTo: m.replyTo ? String(m.replyTo) : null,
+    text: deleted ? "" : (m.text ?? ""),
+    attachments: deleted ? [] : (m.attachments ?? []).map(serializeAttachment),
+    replyTo:
+      m.replyTo && !deleted
+        ? {
+            messageId: String(m.replyTo.messageId),
+            senderId: String(m.replyTo.senderId),
+            type: m.replyTo.type ?? "text",
+            text: m.replyTo.text ?? "",
+            hasAttachments: Boolean(m.replyTo.hasAttachments),
+          }
+        : null,
+    reactions: deleted
+      ? []
+      : (m.reactions ?? [])
+          .filter((r) => r.userIds?.length)
+          .map((r) => ({ emoji: r.emoji, userIds: r.userIds.map(String) })),
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     createdAt: m.createdAt,
@@ -83,8 +104,10 @@ export function serializeMessage(message) {
 /**
  * A conversation as seen by one participant. Read cursors of other participants are only
  * exposed when both sides have read receipts enabled (reciprocal, like most messengers).
+ * `blocks` ({ byMe, byThem } sets) is optional; when given, blocked relations hide last-seen
+ * and are reported under `blocked`.
  */
-export function serializeConversation(conversation, viewer) {
+export function serializeConversation(conversation, viewer, { blocks } = {}) {
   const c = plain(conversation);
   if (!c) return null;
   const viewerId = idOf(viewer);
@@ -93,18 +116,28 @@ export function serializeConversation(conversation, viewer) {
     (viewerDoc && typeof viewerDoc === "object" ? viewerDoc.privacy?.readReceipts : true) !== false;
   const now = Date.now();
 
+  let blockedByMe = false;
+  let blockedByThem = false;
   const participants = (c.participants ?? []).map((p) => {
     const user = userOf(p);
     const userId = idOf(p.userId);
     const isViewer = userId === viewerId;
     const showRead = isViewer || (viewerShowsReceipts && user?.privacy?.readReceipts !== false);
+    const byMe = Boolean(blocks?.byMe?.has(userId));
+    const byThem = Boolean(blocks?.byThem?.has(userId));
+    if (!isViewer) {
+      blockedByMe ||= byMe;
+      blockedByThem ||= byThem;
+    }
+    const serializedUser = user ? serializeUser(user) : null;
+    if (serializedUser && (byMe || byThem)) serializedUser.lastSeenAt = null;
     return {
       userId,
       role: p.role ?? "member",
       joinedAt: p.joinedAt ?? null,
       lastReadAt: showRead ? (p.lastReadAt ?? null) : null,
       lastDeliveredAt: p.lastDeliveredAt ?? null,
-      user: user ? serializeUser(user) : null,
+      user: serializedUser,
     };
   });
 
@@ -120,6 +153,7 @@ export function serializeConversation(conversation, viewer) {
       c.type === "group"
         ? { name: c.group?.name ?? null, avatar: { url: c.group?.avatar?.url ?? null } }
         : null,
+    blocked: blocks ? { byMe: blockedByMe, byThem: blockedByThem } : undefined,
     me: {
       lastReadAt: mine?.lastReadAt ?? null,
       lastDeliveredAt: mine?.lastDeliveredAt ?? null,
@@ -135,8 +169,9 @@ export function serializeConversation(conversation, viewer) {
           _id: String(c.lastMessage._id),
           senderId: String(c.lastMessage.senderId),
           type: c.lastMessage.type ?? "text",
-          text: c.lastMessage.text ?? "",
-          hasAttachments: Boolean(c.lastMessage.hasAttachments),
+          text: c.lastMessage.deletedAt ? "" : (c.lastMessage.text ?? ""),
+          hasAttachments: c.lastMessage.deletedAt ? false : Boolean(c.lastMessage.hasAttachments),
+          deletedAt: c.lastMessage.deletedAt ?? null,
           createdAt: c.lastMessage.createdAt,
         }
       : null,

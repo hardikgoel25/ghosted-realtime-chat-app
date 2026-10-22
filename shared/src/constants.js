@@ -6,12 +6,21 @@ export const LIMITS = Object.freeze({
   PASSWORD_MIN: 8,
   PASSWORD_MAX: 72, // bcrypt input limit
   BIO_MAX: 160,
+  EMAIL_MAX: 254,
   MESSAGE_TEXT_MAX: 4000,
   MESSAGE_IMAGES_MAX: 4,
+  MESSAGE_FILES_MAX: 4,
+  MESSAGE_SEARCH_MAX: 100,
+  REPLY_SNIPPET_MAX: 200,
+  REACTIONS_PER_MESSAGE: 12,
+  REACTION_EMOJI_MAX_LENGTH: 16,
   SEARCH_QUERY_MAX: 50,
   PAGE_SIZE_DEFAULT: 30,
   PAGE_SIZE_MAX: 50,
   IMAGE_MAX_BYTES: 5 * 1024 * 1024,
+  FILE_MAX_BYTES: 20 * 1024 * 1024,
+  AUDIO_MAX_BYTES: 10 * 1024 * 1024,
+  AUDIO_MAX_DURATION_MS: 10 * 60 * 1000,
   AVATAR_MAX_BYTES: 2 * 1024 * 1024,
   IMAGE_MAX_DIMENSION: 2048,
   AVATAR_DIMENSION: 512,
@@ -38,9 +47,38 @@ export const ALLOWED_IMAGE_MIME = Object.freeze([
   "image/gif",
 ]);
 
+/** Document-style attachments. Anything executable or renderable as HTML is deliberately absent. */
+export const ALLOWED_FILE_MIME = Object.freeze([
+  "application/pdf",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+]);
+
+export const ALLOWED_AUDIO_MIME = Object.freeze([
+  "audio/webm",
+  "video/webm", // what magic-byte detection reports for WebM/Opus voice notes
+  "audio/ogg",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+]);
+
 export const CONVERSATION_TYPES = Object.freeze(["direct", "group"]);
 export const CONVERSATION_FILTERS = Object.freeze(["all", "unread", "archived"]);
-export const MESSAGE_TYPES = Object.freeze(["text", "image", "system"]);
+export const MESSAGE_TYPES = Object.freeze(["text", "image", "file", "audio", "system"]);
+export const ATTACHMENT_KINDS = Object.freeze(["image", "file", "audio"]);
+
+export const QUICK_REACTIONS = Object.freeze(["👍", "❤️", "😂", "😮", "😢", "🙏"]);
 
 /** Client-side delivery state of an outgoing message. */
 export const MESSAGE_STATUS = Object.freeze({
@@ -56,6 +94,9 @@ export const SOCKET_EVENTS = Object.freeze({
   PRESENCE_SNAPSHOT: "presence:snapshot",
   PRESENCE_UPDATE: "presence:update",
   MESSAGE_NEW: "message:new",
+  MESSAGE_UPDATED: "message:updated",
+  MESSAGE_DELETED: "message:deleted",
+  MESSAGE_REACTION: "message:reaction",
   MESSAGE_STATUS: "message:status",
   CONVERSATION_UPDATED: "conversation:updated",
   TYPING: "typing",
@@ -77,6 +118,8 @@ export const ERROR_CODES = Object.freeze({
   UNAUTHORIZED: "UNAUTHORIZED",
   TOKEN_EXPIRED: "TOKEN_EXPIRED",
   FORBIDDEN: "FORBIDDEN",
+  BLOCKED: "BLOCKED",
+  EDIT_WINDOW_EXPIRED: "EDIT_WINDOW_EXPIRED",
   CSRF: "CSRF_ORIGIN_MISMATCH",
   ACCOUNT_DISABLED: "ACCOUNT_DISABLED",
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
@@ -86,6 +129,7 @@ export const ERROR_CODES = Object.freeze({
   UNSUPPORTED_MEDIA: "UNSUPPORTED_MEDIA_TYPE",
   RATE_LIMITED: "RATE_LIMITED",
   MEDIA_UNAVAILABLE: "MEDIA_UNAVAILABLE",
+  EMAIL_UNAVAILABLE: "EMAIL_UNAVAILABLE",
   INTERNAL: "INTERNAL_ERROR",
 });
 

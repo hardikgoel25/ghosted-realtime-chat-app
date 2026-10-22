@@ -11,6 +11,9 @@ process.env.REFRESH_REUSE_LEEWAY_MS = "0";
 process.env.CLOUDINARY_CLOUD_NAME = "";
 process.env.CLOUDINARY_API_KEY = "";
 process.env.CLOUDINARY_API_SECRET = "";
+// Capture-only email transport so the email flows can be exercised without SMTP
+process.env.SMTP_URL = "json";
+process.env.APP_URL = "http://localhost:5173";
 delete process.env.RATE_LIMIT_TEST;
 
 beforeAll(async () => {

@@ -3,14 +3,16 @@ import {
   LIMITS,
   notificationPrefsSchema,
   privacySchema,
+  updateEmailSchema,
   updateProfileSchema,
+  userIdParamSchema,
   usernameParamSchema,
   usernameQuerySchema,
   userSearchQuerySchema,
 } from "@ghosted/shared";
 import * as users from "../../controllers/user.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
-import { uploadLimiter, usernameCheckLimiter } from "../../middleware/rateLimit.js";
+import { emailLimiter, uploadLimiter, usernameCheckLimiter } from "../../middleware/rateLimit.js";
 import { imageUpload } from "../../middleware/upload.js";
 import { validate } from "../../middleware/validate.js";
 
@@ -43,6 +45,12 @@ router.patch(
   validate({ body: notificationPrefsSchema }),
   users.updateNotificationPrefs
 );
+router.patch("/me/email", emailLimiter, validate({ body: updateEmailSchema }), users.updateEmail);
+router.delete("/me/email", users.removeEmail);
+router.get("/me/blocked", users.listBlocked);
+
+router.post("/:userId/block", validate({ params: userIdParamSchema }), users.block);
+router.delete("/:userId/block", validate({ params: userIdParamSchema }), users.unblock);
 
 router.get("/:username", validate({ params: usernameParamSchema }), users.getByUsername);
 

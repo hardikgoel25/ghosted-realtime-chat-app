@@ -43,6 +43,12 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  // Email is optional. A nodemailer URL such as smtps://user:pass@smtp.example.com:465,
+  // or the literal "json" for a capture-only transport used by the tests.
+  SMTP_URL: z.string().optional(),
+  EMAIL_FROM: z.string().default("Ghosted <no-reply@ghosted.app>"),
+  // Public URL of the web app, used in email links. Defaults to the first CLIENT_ORIGINS entry.
+  APP_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -61,6 +67,10 @@ if (!parsed.success) {
 export const env = Object.freeze({
   ...parsed.data,
   trustProxy: parsed.data.TRUST_PROXY ?? (parsed.data.NODE_ENV === "production" ? 1 : 0),
+  appUrl: (parsed.data.APP_URL || parsed.data.CLIENT_ORIGINS[0] || "http://localhost:5173").replace(
+    /\/+$/,
+    ""
+  ),
 });
 
 export const isProd = env.NODE_ENV === "production";

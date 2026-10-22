@@ -49,6 +49,13 @@ export const uploadLimiter = make({
   message: "Upload limit reached. Please try again later.",
 });
 
+// Outbound email is the scarce resource here, so every request counts, successful or not
+export const emailLimiter = make({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  message: "Too many email requests. Please try again later.",
+});
+
 export const usernameCheckLimiter = make({
   windowMs: 60 * 1000,
   limit: 30,

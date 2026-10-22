@@ -11,8 +11,8 @@ function announceProfileChange(user) {
   broadcast(SOCKET_EVENTS.USER_UPDATED, { user: serializeUser(user) });
 }
 
-export async function listUsers(currentUserId, { q = "", cursor, limit }) {
-  const filter = { _id: { $ne: currentUserId }, status: USER_STATUS.ACTIVE };
+export async function listUsers(currentUserId, { q = "", cursor, limit, excludeIds = [] }) {
+  const filter = { _id: { $ne: currentUserId, $nin: excludeIds }, status: USER_STATUS.ACTIVE };
   if (q) {
     const safe = escapeRegex(q);
     filter.$or = [
@@ -20,7 +20,7 @@ export async function listUsers(currentUserId, { q = "", cursor, limit }) {
       { fullname: { $regex: safe, $options: "i" } },
     ];
   }
-  if (cursor) filter._id = { ...filter._id, $gt: cursor };
+  if (cursor) filter._id.$gt = cursor;
 
   const docs = await User.find(filter)
     .sort({ _id: 1 })

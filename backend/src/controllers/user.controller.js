@@ -1,10 +1,16 @@
 import * as userService from "../services/user.service.js";
+import * as blockService from "../services/block.service.js";
+import * as authService from "../services/auth.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ok } from "../utils/response.js";
 import { serializeUser } from "../utils/serializers.js";
 
 export async function listUsers(req, res) {
-  const page = await userService.listUsers(req.user._id, req.validated.query);
+  const { byMe, byThem } = await blockService.blockSets(req.user._id);
+  const page = await userService.listUsers(req.user._id, {
+    ...req.validated.query,
+    excludeIds: [...byMe, ...byThem],
+  });
   ok(res, page);
 }
 
@@ -19,7 +25,14 @@ export async function checkUsername(req, res) {
 export async function getByUsername(req, res) {
   const user = await userService.getByUsername(req.validated.params.username);
   const self = String(user._id) === String(req.user._id);
-  ok(res, { user: serializeUser(user, { self }) });
+  const { byMe, byThem } = await blockService.blockSets(req.user._id);
+  const serialized = serializeUser(user, { self });
+  const id = String(user._id);
+  if (byMe.has(id) || byThem.has(id)) serialized.lastSeenAt = null;
+  ok(res, {
+    user: serialized,
+    blocked: self ? null : { byMe: byMe.has(id), byThem: byThem.has(id) },
+  });
 }
 
 export async function updateMe(req, res) {
@@ -46,4 +59,28 @@ export async function updatePrivacy(req, res) {
 export async function updateNotificationPrefs(req, res) {
   const user = await userService.updateNotificationPrefs(req.user, req.validated.body);
   ok(res, { user: serializeUser(user, { self: true }) });
+}
+
+export async function updateEmail(req, res) {
+  const user = await authService.updateEmail(req.user, req.validated.body.email);
+  ok(res, { user: serializeUser(user, { self: true }) });
+}
+
+export async function removeEmail(req, res) {
+  const user = await authService.removeEmail(req.user);
+  ok(res, { user: serializeUser(user, { self: true }) });
+}
+
+export async function block(req, res) {
+  await blockService.blockUser(req.user, req.validated.params.userId);
+  ok(res, { blocked: await blockService.listBlocked(req.user) });
+}
+
+export async function unblock(req, res) {
+  await blockService.unblockUser(req.user, req.validated.params.userId);
+  ok(res, { blocked: await blockService.listBlocked(req.user) });
+}
+
+export async function listBlocked(req, res) {
+  ok(res, { blocked: await blockService.listBlocked(req.user) });
 }

@@ -1,17 +1,21 @@
 import { Router } from "express";
 import {
-  LIMITS,
   conversationFlagsSchema,
   conversationIdParamSchema,
   createDirectConversationSchema,
+  deleteMessageQuerySchema,
+  editMessageSchema,
   listConversationsQuerySchema,
   listMessagesQuerySchema,
+  messageParamSchema,
+  messageSearchQuerySchema,
+  reactionParamSchema,
   sendMessageSchema,
 } from "@ghosted/shared";
 import * as conversations from "../../controllers/conversation.controller.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { messageLimiter, uploadLimiterIfMultipart } from "../../middleware/rateLimit.js";
-import { imagesUpload } from "../../middleware/upload.js";
+import { messageUpload } from "../../middleware/upload.js";
 import { validate } from "../../middleware/validate.js";
 
 const router = Router();
@@ -47,13 +51,38 @@ router.get(
   validate({ params: conversationIdParamSchema, query: listMessagesQuerySchema }),
   conversations.listMessages
 );
+router.get(
+  "/:conversationId/messages/search",
+  validate({ params: conversationIdParamSchema, query: messageSearchQuerySchema }),
+  conversations.searchMessages
+);
 router.post(
   "/:conversationId/messages",
   messageLimiter,
   uploadLimiterIfMultipart,
-  imagesUpload("images", LIMITS.IMAGE_MAX_BYTES, LIMITS.MESSAGE_IMAGES_MAX),
+  messageUpload(),
   validate({ params: conversationIdParamSchema, body: sendMessageSchema }),
   conversations.sendMessage
+);
+router.patch(
+  "/:conversationId/messages/:messageId",
+  validate({ params: messageParamSchema, body: editMessageSchema }),
+  conversations.editMessage
+);
+router.delete(
+  "/:conversationId/messages/:messageId",
+  validate({ params: messageParamSchema, query: deleteMessageQuerySchema }),
+  conversations.deleteMessage
+);
+router.put(
+  "/:conversationId/messages/:messageId/reactions/:emoji",
+  validate({ params: reactionParamSchema }),
+  conversations.addReaction
+);
+router.delete(
+  "/:conversationId/messages/:messageId/reactions/:emoji",
+  validate({ params: reactionParamSchema }),
+  conversations.removeReaction
 );
 
 export default router;

@@ -1,5 +1,6 @@
 import { SOCKET_EVENTS, conversationTypingSchema } from "@ghosted/shared";
 import { participantIdsOf } from "../../services/conversation.service.js";
+import { isBlockedEither } from "../../services/block.service.js";
 import { emitToUser } from "../emit.js";
 
 const TYPING_THROTTLE_MS = 2000;
@@ -22,9 +23,11 @@ export function registerTypingHandlers(socket) {
   const lastSent = new Map(); // conversationId -> timestamp of the last typing:start relayed
   const { userId } = socket.data;
 
-  const relay = (conversationId, participants, isTyping) => {
+  const relay = async (conversationId, participants, isTyping) => {
     for (const id of participants) {
       if (id === userId) continue;
+      // Blocked pairs get no presence signals in either direction
+      if (await isBlockedEither(userId, id)) continue;
       emitToUser(id, SOCKET_EVENTS.TYPING, { conversationId, userId, isTyping });
     }
   };

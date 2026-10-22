@@ -24,6 +24,8 @@ export const conversationFlagsSchema = z
     muted: z.union([z.boolean(), z.number().int().min(1).max(LIMITS.MUTE_MINUTES_MAX)]).optional(),
     archived: z.boolean().optional(),
     pinned: z.boolean().optional(),
+    // true = "mark as unread" (opening the chat marks it read again)
+    unread: z.literal(true).optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: "No fields to update" });
 

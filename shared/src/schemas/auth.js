@@ -38,6 +38,16 @@ export const existingPasswordSchema = z
 
 export const genderSchema = z.enum(GENDERS, { message: "Please select a gender" });
 
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(LIMITS.EMAIL_MAX, "Email is too long")
+  .pipe(z.email("Enter a valid email address"));
+
+/** 64 hex characters: the raw form of email verification / password reset tokens */
+export const emailTokenSchema = z.string().regex(/^[a-f0-9]{64}$/i, "Invalid token");
+
 export const signupSchema = z.strictObject({
   fullname: fullnameSchema,
   username: usernameSchema,
@@ -59,4 +69,22 @@ export const passwordConfirmSchema = z.strictObject({
 export const changePasswordSchema = z.strictObject({
   currentPassword: existingPasswordSchema,
   newPassword: newPasswordSchema,
+});
+
+export const updateEmailSchema = z.strictObject({
+  email: emailSchema,
+});
+
+export const verifyEmailSchema = z.strictObject({
+  token: emailTokenSchema,
+});
+
+export const forgotPasswordSchema = z.strictObject({
+  // username or email address
+  identifier: z.string().trim().min(1, "Enter your username or email").max(LIMITS.EMAIL_MAX),
+});
+
+export const resetPasswordSchema = z.strictObject({
+  token: emailTokenSchema,
+  password: newPasswordSchema,
 });

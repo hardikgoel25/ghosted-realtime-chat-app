@@ -1,10 +1,11 @@
 import mongoose from "mongoose";
-import { SOCKET_EVENTS, USER_STATUS } from "@ghosted/shared";
+import { ERROR_CODES, SOCKET_EVENTS, USER_STATUS } from "@ghosted/shared";
 import Conversation, { directKeyFor } from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { serializeConversation } from "../utils/serializers.js";
+import * as blockService from "./block.service.js";
 import { emitToUser } from "../sockets/emit.js";
 
 const MUTE_FOREVER = new Date("9999-12-31T00:00:00.000Z");
@@ -48,12 +49,21 @@ export function broadcastConversation(conversation, participantIds = null) {
   }
 }
 
+/** The viewer's view including block state; used for REST responses. */
+export async function viewFor(conversation, me) {
+  const blocks = await blockService.blockSets(me._id);
+  return serializeConversation(conversation, me, { blocks });
+}
+
 export async function findOrCreateDirect(me, otherId) {
   if (idOf(otherId) === idOf(me._id)) throw ApiError.badRequest("You cannot message yourself");
   const other = await User.findById(otherId).select("status").lean();
   if (!other || other.status === USER_STATUS.DELETED) throw ApiError.notFound("User not found");
   if (other.status === USER_STATUS.DISABLED) {
     throw ApiError.forbidden("This user is currently unavailable");
+  }
+  if (await blockService.isBlockedEither(me._id, otherId)) {
+    throw ApiError.forbidden("You can't message this person", ERROR_CODES.BLOCKED);
   }
 
   const directKey = directKeyFor(me._id, otherId);
@@ -99,10 +109,13 @@ export async function listConversations(me, { filter = "all", cursor, limit }) {
     ];
   }
 
-  const docs = await Conversation.find(query)
-    .sort({ lastMessageAt: -1, _id: -1 })
-    .limit(limit + 1)
-    .populate(PARTICIPANT_POPULATE);
+  const [docs, blocks] = await Promise.all([
+    Conversation.find(query)
+      .sort({ lastMessageAt: -1, _id: -1 })
+      .limit(limit + 1)
+      .populate(PARTICIPANT_POPULATE),
+    blockService.blockSets(meId),
+  ]);
   const hasMore = docs.length > limit;
   const page = docs.slice(0, limit);
 
@@ -113,14 +126,14 @@ export async function listConversations(me, { filter = "all", cursor, limit }) {
   ).catch(() => {});
 
   return {
-    items: page.map((c) => serializeConversation(c, me)),
+    items: page.map((c) => serializeConversation(c, me, { blocks })),
     nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
   };
 }
 
 export async function getConversation(me, conversationId) {
   const conversation = await loadForMember(me._id, conversationId);
-  return serializeConversation(conversation, me);
+  return viewFor(conversation, me);
 }
 
 export async function updateFlags(me, conversationId, flags) {
@@ -135,15 +148,17 @@ export async function updateFlags(me, conversationId, flags) {
   }
   if (flags.archived !== undefined) $set["participants.$.archived"] = flags.archived;
   if (flags.pinned !== undefined) $set["participants.$.pinned"] = flags.pinned;
+  const update = Object.keys($set).length ? { $set } : {};
+  if (flags.unread) update.$max = { [`unread.${me._id}`]: 1 };
 
   const conversation = await Conversation.findOneAndUpdate(
     { _id: conversationId, "participants.userId": me._id },
-    { $set },
+    update,
     { new: true }
   ).populate(PARTICIPANT_POPULATE);
   if (!conversation) throw ApiError.notFound("Conversation not found");
   broadcastConversation(conversation, [idOf(me._id)]);
-  return serializeConversation(conversation, me);
+  return viewFor(conversation, me);
 }
 
 /** Marks everything in the conversation as read by `me`, telling the other side if allowed. */
@@ -170,7 +185,7 @@ export async function markRead(me, conversationId) {
     }
   }
   broadcastConversation(conversation, [idOf(me._id)]);
-  return serializeConversation(conversation, me);
+  return viewFor(conversation, me);
 }
 
 /**
@@ -230,7 +245,7 @@ export async function clearForMe(me, conversationId) {
   ).populate(PARTICIPANT_POPULATE);
   if (!conversation) throw ApiError.notFound("Conversation not found");
   broadcastConversation(conversation, [idOf(me._id)]);
-  return serializeConversation(conversation, me);
+  return viewFor(conversation, me);
 }
 
 /** Messages newer than `since` in conversations the user belongs to (reconnect catch-up). */
@@ -245,7 +260,7 @@ export async function syncConversations(user, entries, { messagesMax }) {
     if (!ownedIds.has(entry.id)) continue;
     const conv = owned.find((c) => String(c._id) === entry.id);
     const mine = conv.participants.find((p) => idOf(p.userId) === idOf(user._id));
-    const filter = { conversationId: entry.id };
+    const filter = { conversationId: entry.id, deletedFor: { $ne: user._id } };
     const bounds = [];
     if (entry.since) bounds.push(new Date(entry.since));
     if (mine?.clearedAt) bounds.push(mine.clearedAt);

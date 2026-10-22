@@ -96,3 +96,27 @@ export async function revokeSession(req, res) {
   if (id === req.sessionId) clearAuthCookies(res);
   ok(res, { message: "Session revoked" });
 }
+
+// ---- email flows ----
+
+export async function resendVerification(req, res) {
+  await authService.sendVerification(req.user);
+  ok(res, { message: "Verification email sent" });
+}
+
+export async function verifyEmail(req, res) {
+  const user = await authService.verifyEmail(req.validated.body.token);
+  ok(res, { message: "Email verified", email: user.email });
+}
+
+export async function forgotPassword(req, res) {
+  await authService.forgotPassword(req.validated.body.identifier);
+  ok(res, { message: "If that account has a verified email, a reset link is on its way." });
+}
+
+export async function resetPassword(req, res) {
+  const { token, password } = req.validated.body;
+  await authService.resetPassword(token, password);
+  clearAuthCookies(res);
+  ok(res, { message: "Password updated. You can sign in with it now." });
+}
