@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: Lint, test, build, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+        env:
+          HUSKY: "0"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+        env:
+          CI: "true"
+
+      - name: Build frontend
+        run: npm run build -w frontend
+
+      # Blocking: anything that ships to production. The dev toolchain (Tailwind 3's chokidar
+      # chain) is audited separately and will be cleared by the Tailwind 4 upgrade in Phase 1.
+      - name: Audit production dependencies
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Audit dev dependencies (informational)
+        run: npm audit --audit-level=high || true
