@@ -23,6 +23,7 @@
     "test": "npm run test -w backend",
     "migrate": "npm run migrate -w backend",
     "seed": "npm run seed -w backend",
+    "db:reset": "npm run db:reset -w backend --",
     "prepare": "husky"
   },
   "devDependencies": {

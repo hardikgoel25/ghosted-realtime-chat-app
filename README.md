@@ -91,6 +91,7 @@ the script). Prefix it with the local database when using `dev:local`:
 | `npm run format`       | Prettier                                                    |
 | `npm run migrate`      | Runs migrations (`-- --dry-run` to preview)                 |
 | `npm run seed`         | Creates demo users (refuses in production without `--force`)|
+| `npm run db:reset -- --yes` | Drops every collection in the configured database (dev helper; needs `--force` in production) |
 
 ## 🔐 Environment variables (`backend/.env`)
 

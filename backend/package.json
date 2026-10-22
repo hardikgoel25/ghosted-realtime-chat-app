@@ -10,6 +10,7 @@
     "start": "node src/server.js",
     "migrate": "node src/migrations/run.js",
     "seed": "node src/scripts/seed.js",
+    "db:reset": "node src/scripts/reset-db.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
