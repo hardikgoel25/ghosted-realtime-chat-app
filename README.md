@@ -1,4 +1,4 @@
-# 💬 Ghosted — Realtime Chat App
+| Media    | Cloudinary (images re-encoded by `sharp`; documents and audio verified with `file-type`) |# 💬 Ghosted — Realtime Chat App
 
 A full-stack realtime chat application built with React, Express, MongoDB and Socket.IO.
 Version 2 is a ground-up hardening and expansion of the original app; see
@@ -13,11 +13,16 @@ for what each phase delivered.
 
 - Realtime 1-1 conversations over authenticated Socket.IO connections
 - Sent / delivered / seen ticks, typing indicators, multi-device presence and last-seen (with privacy toggles)
-- Conversation list with search, All / Unread / Archived tabs, pin, mute (timed or forever), archive and delete-for-me
-- Optimistic sending with retry, offline awareness, drafts per chat, up to 4 images per message (resized in the browser, re-encoded and metadata-stripped on the server)
-- Virtualised history with infinite scroll, day separators, grouped bubbles, "new messages" divider, lightbox
+- Reply with quotes, edit (15 min), delete for me / for everyone, emoji reactions, copy, message info
+- Photos (resized in the browser), documents (PDF, Office, ZIP, text) and voice messages, all verified by their bytes server-side
+- Conversation list with search, All / Unread / Archived tabs, pin, mute (timed or forever), archive, mark as unread and delete-for-me
+- Search inside a conversation with jump-to-context; virtualised history that pages in both directions
+- Optimistic sending with automatic retry, offline awareness, drafts per chat, "new messages" divider, lightbox
+- Blocking (no messages, search hits or presence between blocked users)
 - Notifications: toasts, sounds, optional desktop notifications, tab badge; muted chats stay quiet
+- Command palette (Ctrl/⌘ K) for chats, settings and themes
 - Username/password auth with short-lived access tokens + rotating refresh sessions, device management, password change
+- Optional email verification and password reset (when SMTP is configured)
 - Profile, appearance (8 themes + system), notification, privacy and account settings; public profile pages
 - Account disable / re-enable / permanent delete (with media cleanup)
 - Brute-force protection, account lockout, rate limits, CSRF origin checks, security headers
@@ -60,7 +65,8 @@ for what each phase delivered.
 
 - Node.js 20.19+ (see `.nvmrc`)
 - MongoDB (local, Docker, or Atlas)
-- A Cloudinary account if you want image uploads (optional — uploads answer 503 without it)
+- A Cloudinary account if you want photo, file and voice uploads (optional — uploads answer 503 without it)
+- An SMTP account if you want email verification and password reset (optional — the UI hides those features without it)
 
 ## 🚀 Getting started
 
@@ -116,6 +122,9 @@ the script). Prefix it with the local database when using `dev:local`:
 | `CLOUDINARY_CLOUD_NAME`  | no       | —                       | All three Cloudinary vars enable uploads               |
 | `CLOUDINARY_API_KEY`     | no       | —                       |                                                        |
 | `CLOUDINARY_API_SECRET`  | no       | —                       |                                                        |
+| `SMTP_URL`               | no       | —                       | nodemailer URL (e.g. `smtps://user:pass@host:465`); enables email verification + password reset |
+| `EMAIL_FROM`             | no       | `Ghosted <no-reply@ghosted.app>` | Sender address for those emails                 |
+| `APP_URL`                | no       | first `CLIENT_ORIGINS` entry | Public web URL used in email links                   |
 
 The frontend needs no env in development. Set `VITE_API_URL` only if the API lives on another
 host (see `frontend/.env.example`).

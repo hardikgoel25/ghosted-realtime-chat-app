@@ -3,6 +3,39 @@
 All notable changes to Ghosted are documented here. The project follows the phased plan in
 `REVAMP_PROMPT.md`.
 
+## [2.2.0-phase2] — 2026-10-22 — Rich messaging and account
+
+### Added
+- **Message actions.** Reply with a quoted snapshot (click the quote to jump to the original),
+  edit your own messages for 15 minutes (shows "edited"), delete for me, delete for everyone
+  (placeholder stays, assets are removed), copy text, message info with delivered/seen times,
+  emoji reactions with a quick bar and a full picker, hover toolbar on desktop and long-press
+  menu on phones.
+- **Attachments beyond photos.** Documents (PDF, Office, ZIP, text/CSV/Markdown/JSON, up to
+  20 MB) as download chips and voice messages recorded in the browser (MediaRecorder, up to
+  10 minutes) with an inline player and playback speed. All uploads are verified by their bytes,
+  not their names.
+- **Blocking.** Block/unblock from the chat header, details drawer, profile page or Privacy
+  settings. Blocked pairs cannot message, find each other in search or see each other's
+  presence; existing history stays readable.
+- **Search inside a conversation** with highlighted results and jump-to-context; the message
+  list can page in both directions from a search hit.
+- **Mark as unread**, from the chat menu or the sidebar context menu.
+- **Email verification and password reset**, active only when `SMTP_URL` is set: add/verify an
+  email in Profile settings, "Forgot password?" on the login page, single-use expiring tokens,
+  reset signs out every device. The server advertises what is enabled on `GET /api/v1/config`.
+- **Command palette** (Ctrl/⌘ K): jump to chats, settings, themes, start a chat or log out.
+- Emoji picker in the composer, drag-and-drop for documents, automatic retry of messages that
+  failed for lack of connectivity.
+- Backend tests for message actions, blocking, email flows and document/voice uploads;
+  Playwright scenario covering reply, reaction, edit and delete.
+
+### Changed
+- `/conversations/:id/messages` accepts `after` and `around` cursors and returns
+  `newerCursor`; message attachments carry `kind`; `lastMessage` carries `deletedAt`.
+- Account deletion also removes blocks and email tokens.
+- Migration `003-attachments` tags pre-existing attachments.
+
 ## [2.1.0-phase1] — 2026-10-22 — Chat core and new shell
 
 ### Added

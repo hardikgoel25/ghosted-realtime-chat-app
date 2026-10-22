@@ -21,7 +21,9 @@ cookie (scoped to `/api/v1/auth/refresh`) carries the session's refresh token.
 | 401    | `UNAUTHORIZED`           | Missing/invalid cookie, invalid credentials            |
 | 401    | `TOKEN_EXPIRED`          | Access token expired — call `/auth/refresh`            |
 | 403    | `ACCOUNT_DISABLED`       | Login refused because the account is disabled          |
-| 403    | `FORBIDDEN`              | Counterpart unavailable (disabled), etc.               |
+| 403    | `FORBIDDEN`              | Counterpart unavailable (disabled), editing someone else's message, etc. |
+| 403    | `BLOCKED`                | One of you has blocked the other                       |
+| 403    | `EDIT_WINDOW_EXPIRED`    | Edits are allowed for 15 minutes after sending         |
 | 403    | `CSRF_ORIGIN_MISMATCH`   | State-changing request from a foreign origin           |
 | 404    | `NOT_FOUND`              | Also used for conversations you are not part of        |
 | 409    | `CONFLICT`               | Username taken                                         |
@@ -30,6 +32,7 @@ cookie (scoped to `/api/v1/auth/refresh`) carries the session's refresh token.
 | 429    | `RATE_LIMITED`           | Too many requests                                      |
 | 429    | `ACCOUNT_LOCKED`         | 5+ failed logins; message says when to retry           |
 | 503    | `MEDIA_UNAVAILABLE`      | Cloudinary is not configured                           |
+| 503    | `EMAIL_UNAVAILABLE`      | SMTP is not configured (email features off)            |
 
 Pagination: list endpoints accept `cursor` and `limit` (1–50) and return `{ items, nextCursor }`
 (`nextCursor` is `null` on the last page). Message cursors are message ids; conversation cursors
@@ -59,6 +62,7 @@ preview }` and `updatedAt`. `lastSeenAt` is `null` for users who hide it.
   "participants": [
     { "userId": "…", "role": "member", "joinedAt": "…", "lastReadAt": "…|null", "lastDeliveredAt": "…|null", "user": { /* User */ } }
   ],
+  "blocked": { "byMe": false, "byThem": false },  // only on REST responses
   "me": { "lastReadAt": "…", "lastDeliveredAt": "…", "mutedUntil": "…|null", "muted": false,
           "archived": false, "pinned": false, "clearedAt": null, "unread": 2 },
   "lastMessage": { "_id": "…", "senderId": "…", "type": "text", "text": "…", "hasAttachments": false, "createdAt": "…" },
@@ -73,11 +77,18 @@ enabled. Delivery and read state of your own messages is derived client-side: a 
 
 **Message**
 
-```json
-{ "_id": "…", "conversationId": "…", "senderId": "…", "clientId": "uuid-or-null", "type": "text",
-  "text": "hello", "attachments": [ { "url": "…", "mime": "image/webp", "size": 12345, "width": 800, "height": 600, "name": "pic.webp" } ],
-  "replyTo": null, "editedAt": null, "deletedAt": null, "createdAt": "…", "updatedAt": "…" }
+```jsonc
+{ "_id": "…", "conversationId": "…", "senderId": "…", "clientId": "uuid-or-null", "type": "text|image|file|audio|system",
+  "text": "hello",
+  "attachments": [ { "kind": "image|file|audio", "url": "…", "mime": "…", "size": 12345, "width": 800, "height": 600, "durationMs": null, "name": "pic.webp" } ],
+  "replyTo": { "messageId": "…", "senderId": "…", "type": "text", "text": "quoted snippet", "hasAttachments": false } /* or null */,
+  "reactions": [ { "emoji": "👍", "userIds": ["…"] } ],
+  "editedAt": null, "deletedAt": null, "createdAt": "…", "updatedAt": "…" }
 ```
+
+A message deleted for everyone keeps its id and timestamps but has `deletedAt` set, an empty
+`text`, and no attachments, reply or reactions. Messages deleted "for me" are simply absent
+from that user's listings.
 
 **Session**
 
@@ -101,6 +112,10 @@ enabled. Delivery and read state of your own messages is derived client-side: a 
 | DELETE | `/auth/account`      | ✔    | `{ password }` — deletes user, direct conversations, messages, media |
 | GET    | `/auth/sessions`     | ✔    | `{ items: Session[] }`                                               |
 | DELETE | `/auth/sessions/:id` | ✔    | Revokes one session (and disconnects its sockets)                    |
+| POST   | `/auth/resend-verification` | ✔ | Re-sends the verification link (5 per 15 min)                       |
+| POST   | `/auth/verify-email`  | –    | `{ token }` from the link; single use, 24 h                          |
+| POST   | `/auth/forgot-password` | –  | `{ identifier }` (username or email); always 200, emails only verified addresses |
+| POST   | `/auth/reset-password`  | –  | `{ token, password }`; single use, 1 h; signs out every session       |
 
 Rules: usernames are NFKC-normalised, lowercased and must match `^[a-z0-9_.]{3,25}$`; full names
 are 2–40 letters/spaces/`'`/`.`/`-`; passwords are 8–72 characters and must score ≥ 2 on zxcvbn;
@@ -120,6 +135,11 @@ are 2–40 letters/spaces/`'`/`.`/`-`; passwords are 8–72 characters and must 
 | DELETE | `/users/me/avatar`         | ✔    | Back to a generated initials avatar                               |
 | PATCH  | `/users/me/privacy`        | ✔    | `{ showLastSeen?, readReceipts? }`                                |
 | PATCH  | `/users/me/notifications`  | ✔    | `{ sound?, desktop?, preview? }`                                  |
+| PATCH  | `/users/me/email`          | ✔    | `{ email }` — stores it unverified and emails a verification link when SMTP is configured |
+| DELETE | `/users/me/email`          | ✔    | Removes the address                                              |
+| GET    | `/users/me/blocked`        | ✔    | `{ blocked: User[] }`                                            |
+| POST   | `/users/:userId/block`     | ✔    | Blocks; returns the updated `blocked` list                        |
+| DELETE | `/users/:userId/block`     | ✔    | Unblocks                                                         |
 
 ## Conversations
 
@@ -128,15 +148,26 @@ are 2–40 letters/spaces/`'`/`.`/`-`; passwords are 8–72 characters and must 
 | GET    | `/conversations?filter=&cursor=&limit=` | `filter`: `all` (default, excludes archived), `unread`, `archived`. Newest activity first. Fetching also marks everything shown as delivered to you. |
 | POST   | `/conversations/direct`                | `{ userId }` → 201 when created, 200 when it already existed. Empty conversations are visible only to their creator until the first message. |
 | GET    | `/conversations/:id`                   | One conversation (404 if you are not a participant)                                        |
-| PATCH  | `/conversations/:id`                   | `{ muted?: boolean \| minutes, archived?, pinned? }` — your own flags only                 |
+| PATCH  | `/conversations/:id`                   | `{ muted?: boolean | minutes, archived?, pinned?, unread?: true }` — your own flags; `unread: true` marks it unread || minutes, archived?, pinned? }` — your own flags only                 |
 | POST   | `/conversations/:id/read`              | Marks everything read; emits `message:status` (seen) to the others if receipts are on     |
 | DELETE | `/conversations/:id`                   | "Delete for me": hides existing messages from you and archives the chat                    |
-| GET    | `/conversations/:id/messages?cursor=&limit=` | Oldest → newest within the page; `cursor` = oldest id of the previous page           |
-| POST   | `/conversations/:id/messages`          | JSON `{ text, clientId? }` or multipart `text`, `clientId`, `images` (≤ 4 files, ≤ 5 MB each) |
+| GET    | `/conversations/:id/messages?cursor=&after=&around=&limit=` | Oldest → newest within the page. `cursor`: older than this id; `after`: newer than this id (returns `newerCursor`); `around`: a window centred on this id (returns both cursors) |
+| GET    | `/conversations/:id/messages/search?q=&cursor=&limit=` | Case-insensitive substring search in text, newest first; skips deleted messages |
+| POST   | `/conversations/:id/messages`          | JSON `{ text, clientId?, replyTo? }` or multipart with the same fields plus `images[]` (≤ 4, 5 MB each), `files[]` (≤ 4, 20 MB each: PDF, Office, ZIP, text/CSV/Markdown/JSON) and one `audio` part (≤ 10 MB, with `audioDurationMs`) |
+| PATCH  | `/conversations/:id/messages/:messageId` | `{ text }` — own messages, within 15 minutes; sets `editedAt`                                   |
+| DELETE | `/conversations/:id/messages/:messageId?scope=me|everyone` | `me` hides it for you; `everyone` (own messages) wipes content and assets, leaves a placeholder |
+| PUT    | `/conversations/:id/messages/:messageId/reactions/:emoji` | Adds your reaction (max 12 distinct emojis per message); returns `{ reactions }` |
+| DELETE | `/conversations/:id/messages/:messageId/reactions/:emoji` | Removes it                                                                   |
 
 `clientId` (UUID v4) makes sends idempotent: a retry with the same id returns the existing
 message with status 200 instead of creating a duplicate. A new message un-archives the
 conversation for every participant and increments their unread counters.
+
+## Config
+
+| Method | Path      | Notes                                                                                  |
+| ------ | --------- | -------------------------------------------------------------------------------------- |
+| GET    | `/config` | Public capability flags: `{ emailEnabled, mediaEnabled, limits: { imageMaxBytes, fileMaxBytes, audioMaxBytes, messageImagesMax, messageFilesMax, editWindowMs } }` |
 
 ## Health
 
