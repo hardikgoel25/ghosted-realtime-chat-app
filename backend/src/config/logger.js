@@ -27,7 +27,13 @@ export const logger = pino({
     !isProd && !isTest
       ? {
           target: "pino-pretty",
-          options: { colorize: true, translateTime: "HH:MM:ss", ignore: "pid,hostname" },
+          // sync: CLI scripts (migrate, seed) exit right after their last log line
+          options: {
+            colorize: true,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+            sync: true,
+          },
         }
       : undefined,
 });

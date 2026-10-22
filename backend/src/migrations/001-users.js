@@ -68,7 +68,11 @@ export async function up(db, { dryRun = false, logger } = {}) {
     if (Object.keys($unset).length) update.$unset = $unset;
     if (!Object.keys(update).length) continue;
 
-    logger?.debug({ userId: String(u._id), update }, "Migrating user");
+    // Field names only: the update carries the password hash, which must never be logged
+    logger?.debug(
+      { userId: String(u._id), set: Object.keys($set), unset: Object.keys($unset) },
+      "Migrating user"
+    );
     if (!dryRun) await users.updateOne({ _id: u._id }, update);
     updated += 1;
   }

@@ -70,11 +70,10 @@ if (isDirectRun) {
         "Seed complete"
       );
       await disconnectDb();
-      process.exit(0);
     })
     .catch(async (err) => {
       logger.error({ err }, "Seed failed");
       await disconnectDb().catch(() => {});
-      process.exit(1);
+      process.exitCode = 1;
     });
 }

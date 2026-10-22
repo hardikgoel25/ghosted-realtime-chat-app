@@ -46,11 +46,10 @@ if (isDirectRun) {
         dryRun ? "Dry run complete" : "Migrations complete"
       );
       await disconnectDb();
-      process.exit(0);
     })
     .catch(async (err) => {
       logger.error({ err }, "Migration failed");
       await disconnectDb().catch(() => {});
-      process.exit(1);
+      process.exitCode = 1;
     });
 }
