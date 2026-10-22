@@ -1,0 +1,154 @@
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Archive,
+  ArrowLeft,
+  Bell,
+  BellOff,
+  Info,
+  MoreVertical,
+  Pin,
+  PinOff,
+  Trash2,
+  User,
+} from "lucide-react";
+import { useAuthStore } from "../../stores/useAuthStore";
+import { useConversationStore } from "../../stores/useConversationStore";
+import { useUIStore } from "../../stores/useUIStore";
+import { lastSeenLabel } from "../../lib/format";
+import Avatar from "../../components/ui/Avatar";
+import ContextMenu from "../../components/ui/ContextMenu";
+import Dialog from "../../components/ui/Dialog";
+import {
+  conversationAvatarUser,
+  conversationTitle,
+  otherParticipant,
+} from "../conversations/conversationHelpers";
+
+export default function ChatHeader({ conversation }) {
+  const me = useAuthStore((s) => s.authUser);
+  const other = otherParticipant(conversation, me._id)?.user ?? null;
+  const online = useAuthStore((s) => (other ? s.onlineUsers.includes(other._id) : false));
+  const presenceLastSeen = useAuthStore((s) => (other ? s.lastSeen[other._id] : undefined));
+  const typing = useConversationStore((s) => s.typing[conversation._id]);
+  const setFlags = useConversationStore((s) => s.setFlags);
+  const clearChat = useConversationStore((s) => s.clearChat);
+  const toggleDetails = useUIStore((s) => s.toggleDetails);
+  const navigate = useNavigate();
+  const [menu, setMenu] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const id = conversation._id;
+  const title = conversationTitle(conversation, me._id);
+  const avatarUser = conversationAvatarUser(conversation, me._id);
+  const typingNow = Boolean(typing && Object.keys(typing).some((uid) => uid !== me._id));
+  const lastSeen = presenceLastSeen !== undefined ? presenceLastSeen : other?.lastSeenAt;
+  const status = typingNow ? "typing…" : online ? "Online" : lastSeenLabel(lastSeen);
+  const { muted, pinned, archived } = conversation.me ?? {};
+
+  const items = [
+    other && {
+      label: "View profile",
+      icon: <User className="size-4" />,
+      onSelect: () => navigate(`/u/${other.username}`),
+    },
+    {
+      label: muted ? "Unmute" : "Mute",
+      icon: muted ? <Bell className="size-4" /> : <BellOff className="size-4" />,
+      onSelect: () => setFlags(id, { muted: !muted }),
+    },
+    {
+      label: pinned ? "Unpin" : "Pin",
+      icon: pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />,
+      onSelect: () => setFlags(id, { pinned: !pinned }),
+    },
+    {
+      label: archived ? "Unarchive" : "Archive",
+      icon: <Archive className="size-4" />,
+      onSelect: () => setFlags(id, { archived: !archived }),
+    },
+    {
+      label: "Delete chat",
+      icon: <Trash2 className="size-4" />,
+      danger: true,
+      onSelect: () => setConfirmDelete(true),
+    },
+  ];
+
+  return (
+    <header className="h-14 shrink-0 flex items-center gap-1 px-2 sm:px-3 border-b border-base-300 bg-base-100/90 backdrop-blur">
+      <Link to="/" className="btn btn-ghost btn-sm btn-circle md:hidden" aria-label="Back to chats">
+        <ArrowLeft className="size-5" />
+      </Link>
+
+      <Link
+        to={other ? `/u/${other.username}` : "#"}
+        className="flex items-center gap-3 min-w-0 flex-1 rounded-lg hover:bg-base-200 px-1.5 py-1"
+        aria-label={`${title}: ${status}`}
+      >
+        <Avatar user={avatarUser} size="sm" online={other ? online : undefined} />
+        <span className="min-w-0">
+          <span className="block font-semibold truncate leading-tight">{title}</span>
+          <span
+            className={`block text-xs truncate ${typingNow ? "text-primary" : "text-base-content/60"}`}
+            aria-live="polite"
+          >
+            {status}
+          </span>
+        </span>
+      </Link>
+
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm btn-circle"
+        onClick={toggleDetails}
+        aria-label="Conversation details"
+        title="Details"
+      >
+        <Info className="size-5" />
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm btn-circle"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setMenu({ clientX: rect.right - 208, clientY: rect.bottom + 4 });
+        }}
+        aria-label="More options"
+        aria-haspopup="menu"
+      >
+        <MoreVertical className="size-5" />
+      </button>
+
+      <ContextMenu anchor={menu} items={items} onClose={() => setMenu(null)} />
+
+      <Dialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete this chat?"
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={async () => {
+                setConfirmDelete(false);
+                if (await clearChat(id)) navigate("/", { replace: true });
+              }}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-base-content/70">
+          This removes the messages from your side only. New messages will still reach you.
+        </p>
+      </Dialog>
+    </header>
+  );
+}

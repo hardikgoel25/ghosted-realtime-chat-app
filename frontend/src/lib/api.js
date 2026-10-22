@@ -1,5 +1,5 @@
 import axios from "axios";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 const API_ORIGIN = import.meta.env.VITE_API_URL?.replace(/\/+$/, "") || "";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
@@ -20,7 +20,9 @@ export function toApiError(error) {
     });
   }
   if (!error.response) {
-    return Object.assign(new Error("Network error. Check your connection."), { code: "NETWORK" });
+    return Object.assign(new Error("You appear to be offline. Check your connection."), {
+      code: "NETWORK",
+    });
   }
   return Object.assign(new Error(error.message || "Something went wrong"), {
     code: "UNKNOWN",

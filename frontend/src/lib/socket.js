@@ -41,6 +41,12 @@ export function connectSocket({ onAuthFailure } = {}) {
   return socket;
 }
 
+export function emit(event, payload) {
+  if (!socket?.connected) return false;
+  socket.emit(event, payload);
+  return true;
+}
+
 export function disconnectSocket() {
   if (!socket) return;
   socket.removeAllListeners();

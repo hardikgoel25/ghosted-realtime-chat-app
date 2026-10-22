@@ -1,32 +1,39 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.5",
     "@ghosted/shared": "*",
+    "@zxcvbn-ts/core": "^3.0.4",
+    "@zxcvbn-ts/language-common": "^3.0.4",
     "axios": "^1.9.0",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.0.0",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-hot-toast": "^2.5.2",
     "react-router-dom": "^7.6.1",
+    "react-virtuoso": "^4.12.0",
     "socket.io-client": "^4.8.1",
+    "sonner": "^2.0.0",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
-    "autoprefixer": "^10.4.21",
-    "daisyui": "^4.12.24",
-    "postcss": "^8.5.3",
-    "tailwindcss": "^3.4.17",
-    "vite": "^6.3.5"
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0",
+    "vite": "^6.3.5",
+    "vitest": "^5.0.5"
   }
 }
