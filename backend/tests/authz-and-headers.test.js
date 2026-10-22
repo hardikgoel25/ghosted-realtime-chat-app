@@ -105,6 +105,15 @@ describe("security headers", () => {
     expect(res.status).toBe(200);
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
     expect(res.headers["content-security-policy"]).toContain("default-src 'self'");
+    // Uploaded images and voice notes are served from Cloudinary
+    const csp = res.headers["content-security-policy"];
+    const directive = (name) =>
+      csp
+        .split(";")
+        .map((d) => d.trim())
+        .find((d) => d.startsWith(name + " "));
+    expect(directive("img-src")).toContain("https://res.cloudinary.com");
+    expect(directive("media-src")).toContain("https://res.cloudinary.com");
     expect(res.headers["x-frame-options"]).toBeDefined();
     expect(res.headers["x-request-id"]).toBeTruthy();
     expect(res.headers["x-powered-by"]).toBeUndefined();

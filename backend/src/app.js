@@ -57,7 +57,7 @@ export function createApp() {
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "blob:", CLOUDINARY_HOST],
-          mediaSrc: ["'self'", "blob:"],
+          mediaSrc: ["'self'", "blob:", CLOUDINARY_HOST],
           connectSrc: ["'self'", "ws:", "wss:"],
           fontSrc: ["'self'", "data:"],
           objectSrc: ["'none'"],
