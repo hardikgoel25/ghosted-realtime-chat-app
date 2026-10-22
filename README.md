@@ -11,26 +11,26 @@ for what each phase delivered.
 
 ## ✨ Features (current)
 
-- Realtime 1-1 messaging over authenticated Socket.IO connections
-- Multi-device presence (online while any tab is open), last-seen with a privacy toggle
-- Typing indicators, unread counters, receive/send sounds, tab-title badge
-- Cursor-paginated message history, image messages (validated, re-encoded, EXIF-stripped)
-- Username/password auth with short-lived access tokens + rotating refresh sessions
-- Device/session management (list, revoke one, sign out everywhere), password change
-- Profile editing (name, username with live availability check, bio, gender, avatar)
+- Realtime 1-1 conversations over authenticated Socket.IO connections
+- Sent / delivered / seen ticks, typing indicators, multi-device presence and last-seen (with privacy toggles)
+- Conversation list with search, All / Unread / Archived tabs, pin, mute (timed or forever), archive and delete-for-me
+- Optimistic sending with retry, offline awareness, drafts per chat, up to 4 images per message (resized in the browser, re-encoded and metadata-stripped on the server)
+- Virtualised history with infinite scroll, day separators, grouped bubbles, "new messages" divider, lightbox
+- Notifications: toasts, sounds, optional desktop notifications, tab badge; muted chats stay quiet
+- Username/password auth with short-lived access tokens + rotating refresh sessions, device management, password change
+- Profile, appearance (8 themes + system), notification, privacy and account settings; public profile pages
 - Account disable / re-enable / permanent delete (with media cleanup)
 - Brute-force protection, account lockout, rate limits, CSRF origin checks, security headers
-- 32 DaisyUI themes
 
 ## 🛠️ Tech stack
 
 | Layer    | Choice                                                                    |
 | -------- | ------------------------------------------------------------------------- |
-| Frontend | React 19, Vite, Zustand, React Router, Tailwind CSS + DaisyUI, lucide     |
+| Frontend | React 19, Vite, Zustand, React Router 7, Tailwind CSS 4 + DaisyUI 5, react-virtuoso, framer-motion, sonner |
 | Backend  | Node 20+, Express 5, Mongoose 8, Socket.IO 4, Zod, pino, helmet, multer   |
 | Shared   | `@ghosted/shared` — Zod schemas and constants used by both sides          |
 | Media    | Cloudinary (uploads are validated with `file-type` and re-encoded by `sharp`) |
-| Tests    | Vitest, Supertest, mongodb-memory-server, socket.io-client                |
+| Tests    | Vitest, Supertest, mongodb-memory-server, socket.io-client, Playwright |
 
 ## 📁 Repository layout
 
@@ -38,15 +38,20 @@ for what each phase delivered.
 .
 ├── backend/          Express API + Socket.IO server
 │   ├── src/config/      env (Zod-validated), db, logger, cloudinary
-│   ├── src/models/      User, Session, Message
+│   ├── src/models/      User, Session, Conversation, Message
 │   ├── src/middleware/  auth, validate, rateLimit, origin (CSRF), upload, error
-│   ├── src/services/    auth, token, user, message, media, presence
+│   ├── src/services/    auth, token, user, conversation, message, media, presence
 │   ├── src/controllers/ thin HTTP handlers
 │   ├── src/routes/v1/   /api/v1/*
 │   ├── src/sockets/     handshake auth, presence, typing, emit helpers
 │   ├── src/migrations/  idempotent data migrations (run on every start)
 │   └── tests/           integration tests
 ├── frontend/         Vite + React client
+│   ├── src/app/         router, shell, guards, socket bridge
+│   ├── src/features/    auth, conversations, chat, profile, settings
+│   ├── src/stores/      zustand stores (auth, conversations, messages, ui, theme)
+│   └── src/components/  shared UI primitives
+├── e2e/              Playwright smoke tests (self-contained server + in-memory MongoDB)
 ├── shared/           Zod schemas + constants shared by both packages
 └── docs/             API and socket event reference
 ```
@@ -86,7 +91,8 @@ the script). Prefix it with the local database when using `dev:local`:
 | `npm run dev:local`    | Same, against a zero-install local MongoDB in `backend/.data` |
 | `npm run build`        | Installs deps and builds the frontend into `frontend/dist`  |
 | `npm start`            | Runs pending migrations, then starts the API (serves `dist` in production) |
-| `npm test`             | Backend integration tests (spins up an in-memory MongoDB)   |
+| `npm test`             | Backend integration tests + frontend unit tests             |
+| `npm run test:e2e`     | Playwright smoke tests (builds the frontend, boots a throwaway server) |
 | `npm run lint`         | ESLint across all packages                                  |
 | `npm run format`       | Prettier                                                    |
 | `npm run migrate`      | Runs migrations (`-- --dry-run` to preview)                 |
@@ -117,10 +123,11 @@ host (see `frontend/.env.example`).
 ## 🧪 Testing
 
 ```bash
-npm test
+npm test             # backend + frontend unit tests
+npm run test:e2e     # Playwright (first time: npx playwright install chromium)
 ```
 
-The suite covers auth (signup validation, uniform errors, lockout, refresh rotation and reuse
+The backend suite covers auth (signup validation, uniform errors, lockout, refresh rotation and reuse
 detection, logout, sessions, password change, disable/enable/delete), validation and the error
 envelope, authorization, CSRF origin checks, security headers, rate limiting, uploads (magic-byte
 checks, size limits, mock Cloudinary), the Socket.IO handshake (cookie auth, forged ids ignored,

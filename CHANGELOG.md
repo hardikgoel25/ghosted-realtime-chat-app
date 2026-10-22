@@ -3,6 +3,51 @@
 All notable changes to Ghosted are documented here. The project follows the phased plan in
 `REVAMP_PROMPT.md`.
 
+## [2.1.0-phase1] — 2026-10-22 — Chat core and new shell
+
+### Added
+- **Conversations model.** Direct chats are first-class documents with per-participant read and
+  delivery cursors, unread counters, mute (with duration), pin, archive and "delete for me".
+  New `/api/v1/conversations` endpoints replace `/api/v1/messages/:userId`; migration
+  `002-conversations` groups existing messages into conversations and moves images into
+  `attachments`.
+- **Delivery states.** Sent / delivered / seen ticks derived from participant cursors,
+  reciprocal read-receipt privacy, `message:status` and `conversation:updated` socket events,
+  delivered-on-fetch and delivered-on-sync, `sync` catch-up after reconnects.
+- **Optimistic sending** with pending state, failure + retry/discard, idempotent `clientId`,
+  automatic retry queue when connectivity returns, multi-image messages (up to 4) resized in
+  the browser before upload, paste and drag-and-drop.
+- **New UI shell** on Tailwind 4 + DaisyUI 5: two custom Ghosted themes (dark/light) plus six
+  curated themes and a System option applied before first paint; Inter self-hosted; two-pane
+  desktop layout with an optional details drawer; phone layout driven by routes (`/`,
+  `/c/:id`, `/u/:username`, `/settings/:section`) with deep links preserved through login.
+- Sidebar with search, All / Unread / Archived tabs, previews, relative times, unread badges,
+  typing state, pin/mute icons, right-click and long-press context menu; "New chat" dialog
+  with user search.
+- Virtualised message list with upward infinite scroll that keeps scroll position, day
+  separators, grouped bubbles, "new messages" divider, jump-to-latest button, safe link
+  detection, long-message collapsing, image grid and keyboard-navigable lightbox.
+- Composer with auto-growing textarea, Enter to send, drafts per conversation, attachment
+  previews, character counter and offline awareness; typing indicators per conversation.
+- Notifications: toast with "Open" action, receive sound, optional desktop notifications,
+  title badge; muted chats stay silent.
+- Settings pages: Profile, Appearance, Notifications, Privacy (last seen, read receipts),
+  Account (change password, device sessions with revoke / sign out everywhere, disable, delete).
+- Public profile page (`/u/:username`) with a Message button.
+- Playwright smoke suite (two users chatting on desktop and mobile viewports, deep-link
+  redirect) with a self-contained production server + in-memory MongoDB; frontend unit tests
+  for formatting, linkification and status derivation; CI runs both.
+
+### Changed
+- Account deletion now removes the user's direct conversations (and their messages) and tells
+  clients which ones.
+- `user:deleted` carries `conversationIds`; typing events are keyed by conversation.
+- Socket event budget raised to 60 per 10 s; sonner replaces react-hot-toast.
+
+### Removed
+- Legacy `/api/v1/messages` routes, old page/components, Tailwind 3 and DaisyUI 4 config,
+  `react-hot-toast`.
+
 ## [2.0.0-phase0] — 2026-10-22 — Foundation and hardening
 
 ### Added
