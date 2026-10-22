@@ -157,12 +157,15 @@
 
 /* Message bubbles */
 .bubble {
-  max-width: min(78%, 36rem);
+  /* Width is capped by the column wrapper; break-word (not anywhere) keeps short messages on
+     one line while still wrapping long unbroken strings. */
+  max-width: 100%;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   border-radius: 1.125rem;
   line-height: 1.45;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .bubble-mine {
   background-color: var(--color-primary);

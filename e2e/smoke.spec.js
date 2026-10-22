@@ -50,7 +50,10 @@ test("two people can find each other, chat in realtime and see typing and seen s
   await expect(alice.locator(".bubble").last()).toContainText("hello bob");
 
   // Bob sees it arrive in his list with an unread badge, then opens it
-  const item = bob.getByRole("listitem").filter({ hasText: "Alice Test" });
+  const item = bob
+    .getByRole("list", { name: "Chats" })
+    .getByRole("listitem")
+    .filter({ hasText: "Alice Test" });
   await expect(item).toBeVisible();
   await expect(item.locator(".badge-primary")).toHaveText("1");
   await item.click();

@@ -83,7 +83,9 @@ export default function MessageBubble({ row, conversation, meId, onOpenImage }) 
           </div>
         )}
 
-        <div className={`flex flex-col ${mine ? "items-end" : "items-start"} max-w-full`}>
+        <div
+          className={`flex flex-col min-w-0 max-w-[min(78%,36rem)] ${mine ? "items-end" : "items-start"}`}
+        >
           <div
             className={`bubble ${mine ? "bubble-mine" : "bubble-theirs"} ${
               message.pending ? "opacity-75" : ""
@@ -119,7 +121,9 @@ export default function MessageBubble({ row, conversation, meId, onOpenImage }) 
               </div>
             )}
 
-            {text && <p className="whitespace-pre-wrap text-[0.95rem]">{renderText(text)}</p>}
+            {text && (
+              <p className="whitespace-pre-wrap break-words text-[0.95rem]">{renderText(text)}</p>
+            )}
             {long && (
               <button
                 type="button"
@@ -135,7 +139,9 @@ export default function MessageBubble({ row, conversation, meId, onOpenImage }) 
                 mine ? "text-primary-content/75" : "text-base-content/50"
               }`}
             >
-              <time dateTime={message.createdAt}>{timeOf(message.createdAt)}</time>
+              <time dateTime={message.createdAt} className="whitespace-nowrap">
+                {timeOf(message.createdAt)}
+              </time>
               {mine && <StatusTicks status={status} />}
             </div>
           </div>
