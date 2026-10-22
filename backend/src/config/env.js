@@ -12,6 +12,17 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(5001),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
+  // Optional resolvers for the SRV/TXT lookups behind mongodb+srv:// URIs, for networks whose
+  // default DNS refuses them (e.g. a local stub resolver). Comma-separated IPs.
+  DNS_SERVERS: z
+    .string()
+    .optional()
+    .transform((s) =>
+      (s ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    ),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   ACCESS_TOKEN_TTL: z
     .string()

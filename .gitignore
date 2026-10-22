@@ -15,6 +15,9 @@ dist-ssr
 coverage
 .husky/_
 
+# Local development database (npm run dev:local)
+backend/.data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

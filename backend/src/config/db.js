@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import mongoose from "mongoose";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
@@ -7,6 +8,10 @@ mongoose.set("strictQuery", true);
 let listenersBound = false;
 
 export async function connectDb(uri = env.MONGODB_URI) {
+  if (env.DNS_SERVERS.length > 0) {
+    dns.setServers(env.DNS_SERVERS);
+    logger.info({ servers: env.DNS_SERVERS }, "Using custom DNS servers for SRV lookups");
+  }
   const conn = await mongoose.connect(uri, { serverSelectionTimeoutMS: 10_000 });
   logger.info({ host: conn.connection.host, db: conn.connection.name }, "MongoDB connected");
   if (!listenersBound) {

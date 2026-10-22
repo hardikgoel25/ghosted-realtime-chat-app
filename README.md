@@ -70,14 +70,20 @@ cp backend/.env.example backend/.env
 npm run dev                      # API on :5001, web on :5173 (API proxied, same-origin cookies)
 ```
 
+**No MongoDB handy?** `npm run dev:local` starts a real MongoDB binary (downloaded once, data
+kept in `backend/.data/mongo`) and runs the same dev servers against it — nothing to install
+and no `MONGODB_URI` needed. Use `npm run dev` when you want your own database or Atlas.
+
 Optional: `npm run seed` creates three demo users (`alice`, `bob`, `casey`, password printed by
-the script).
+the script). Prefix it with the local database when using `dev:local`:
+`node backend/src/scripts/local-mongo.js npm run seed`.
 
 ## 📜 Scripts (run from the repo root)
 
 | Script                 | What it does                                                |
 | ---------------------- | ----------------------------------------------------------- |
 | `npm run dev`          | Backend (`node --watch`) + frontend (Vite) together         |
+| `npm run dev:local`    | Same, against a zero-install local MongoDB in `backend/.data` |
 | `npm run build`        | Installs deps and builds the frontend into `frontend/dist`  |
 | `npm start`            | Runs pending migrations, then starts the API (serves `dist` in production) |
 | `npm test`             | Backend integration tests (spins up an in-memory MongoDB)   |
@@ -90,7 +96,8 @@ the script).
 
 | Variable                 | Required | Default                 | Notes                                                  |
 | ------------------------ | -------- | ----------------------- | ------------------------------------------------------ |
-| `MONGODB_URI`            | yes      | —                       | Connection string                                      |
+| `MONGODB_URI`            | yes      | —                       | Connection string (ignored by `npm run dev:local`)     |
+| `DNS_SERVERS`            | no       | —                       | Resolver IPs for `mongodb+srv://` lookups when the default DNS refuses SRV queries |
 | `JWT_SECRET`             | yes      | —                       | ≥ 32 random characters; signs access tokens            |
 | `NODE_ENV`               | no       | `development`           | `production` enables secure cookies, HSTS, static serving |
 | `PORT`                   | no       | `5001`                  |                                                        |

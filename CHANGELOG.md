@@ -19,6 +19,7 @@ All notable changes to Ghosted are documented here. The project follows the phas
 - pino structured logging with redaction and request ids, Zod-validated environment, health/readiness endpoints, graceful shutdown.
 - Idempotent migration (`001-users`) that converts existing accounts; runs on every start.
 - Vitest integration suite (auth, validation, authz, CSRF, headers, rate limits, uploads, sockets, migration), GitHub Actions CI, ESLint flat config + Prettier, Husky + lint-staged, `.env.example` files, API/socket/security docs.
+- `npm run dev:local`: zero-install local MongoDB (binary managed by mongodb-memory-server, data persisted in `backend/.data`) for development without Atlas; optional `DNS_SERVERS` for networks whose resolver refuses the SRV lookups behind `mongodb+srv://`.
 
 ### Changed
 - Frontend talks to `/api/v1` through a client that unwraps the envelope, refreshes expired sessions once and shows each error exactly once.
