@@ -42,9 +42,10 @@ export default function SettingsPage() {
             <button
               key={id}
               className={`flex-1 px-4 py-2 rounded-lg text-sm whitespace-nowrap transition
-                ${activeSection === id
-                  ? "bg-primary text-primary-content"
-                  : "bg-base-200 text-base-content hover:bg-base-300"
+                ${
+                  activeSection === id
+                    ? "bg-primary text-primary-content"
+                    : "bg-base-200 text-base-content hover:bg-base-300"
                 }`}
               onClick={() => setActiveSection(id)}
             >
@@ -63,9 +64,8 @@ export default function SettingsPage() {
               <li key={id}>
                 <button
                   className={`w-full text-left px-3 py-2 rounded-md transition
-                    ${activeSection === id
-                      ? "bg-primary text-primary-content"
-                      : "hover:bg-base-200"
+                    ${
+                      activeSection === id ? "bg-primary text-primary-content" : "hover:bg-base-200"
                     }`}
                   onClick={() => setActiveSection(id)}
                 >

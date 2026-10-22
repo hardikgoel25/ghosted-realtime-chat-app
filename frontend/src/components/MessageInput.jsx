@@ -1,73 +1,112 @@
-import { useRef, useState } from "react";
-import { useChatStore } from "../store/useChatStore";
-import { Image, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
+import { Image, Loader2, Send, X } from "lucide-react";
+import { ALLOWED_IMAGE_MIME, LIMITS } from "@ghosted/shared";
+import { useChatStore } from "../store/useChatStore";
+
+const TYPING_STOP_MS = 3000;
 
 const MessageInput = () => {
   const [text, setText] = useState("");
-  const [imagePreview, setImagePreview] = useState(null);
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
-  const { sendMessage } = useChatStore();
-  const sendSound = new Audio("/send.mp3");
-  sendSound.volume = 0.5;
+  const typingRef = useRef({ active: false, timer: null });
+  const { sendMessage, isSending, emitTyping, selectedUser } = useChatStore();
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
+  useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl]);
+
+  // Reset the draft and typing state when switching conversations
+  useEffect(() => {
+    setText("");
+    setFile(null);
+    setPreviewUrl(null);
+    const ref = typingRef.current;
+    return () => {
+      clearTimeout(ref.timer);
+      ref.active = false;
+    };
+  }, [selectedUser?._id]);
+
+  const stopTyping = () => {
+    clearTimeout(typingRef.current.timer);
+    if (typingRef.current.active) {
+      typingRef.current.active = false;
+      emitTyping(false);
+    }
+  };
+
+  const handleTextChange = (e) => {
+    setText(e.target.value);
+    if (!typingRef.current.active) {
+      typingRef.current.active = true;
+      emitTyping(true);
+    }
+    clearTimeout(typingRef.current.timer);
+    typingRef.current.timer = setTimeout(stopTyping, TYPING_STOP_MS);
+  };
+
+  const pickFile = (candidate) => {
+    if (!candidate) return;
+    if (!ALLOWED_IMAGE_MIME.includes(candidate.type)) {
+      toast.error("Please select a JPEG, PNG, WebP or GIF image");
       return;
     }
+    if (candidate.size > LIMITS.IMAGE_MAX_BYTES) {
+      toast.error(`Image must be under ${Math.round(LIMITS.IMAGE_MAX_BYTES / 1024 / 1024)} MB`);
+      return;
+    }
+    setFile(candidate);
+    setPreviewUrl(URL.createObjectURL(candidate));
+  };
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImagePreview(reader.result);
-    };
-    reader.readAsDataURL(file);
+  const handleImageChange = (e) => {
+    pickFile(e.target.files?.[0]);
+  };
+
+  const handlePaste = (e) => {
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));
+    if (item) {
+      e.preventDefault();
+      pickFile(item.getAsFile());
+    }
   };
 
   const removeImage = () => {
-    setImagePreview(null);
+    setFile(null);
+    setPreviewUrl(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!text.trim() && !imagePreview) return;
-
-    try {
-      await sendMessage({
-        text: text.trim(),
-        image: imagePreview,
-      });
-
-      sendSound.play().catch((err) =>
-        console.warn("Send sound failed to play:", err)
-      );
-
-      // Clear form
+    const trimmed = text.trim();
+    if ((!trimmed && !file) || isSending) return;
+    stopTyping();
+    const ok = await sendMessage({ text: trimmed, file });
+    if (ok) {
       setText("");
-      setImagePreview(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (error) {
-      console.error("Failed to send message:", error);
+      removeImage();
     }
   };
 
+  const canSend = (text.trim().length > 0 || Boolean(file)) && !isSending;
+
   return (
     <div className="p-4 w-full">
-      {imagePreview && (
+      {previewUrl && (
         <div className="mb-3 flex items-center gap-2">
           <div className="relative">
             <img
-              src={imagePreview}
-              alt="Preview"
-              className="w-20 h-20 object-cover rounded-lg border border-zinc-700"
+              src={previewUrl}
+              alt="Selected attachment"
+              className="w-20 h-20 object-cover rounded-lg border border-base-300"
             />
             <button
               onClick={removeImage}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300
-              flex items-center justify-center"
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300 flex items-center justify-center"
               type="button"
+              aria-label="Remove image"
             >
               <X className="size-3" />
             </button>
@@ -82,34 +121,39 @@ const MessageInput = () => {
             className="w-full input input-bordered rounded-lg input-sm sm:input-md"
             placeholder="Type a message..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            maxLength={LIMITS.MESSAGE_TEXT_MAX}
+            onChange={handleTextChange}
+            onPaste={handlePaste}
+            onBlur={stopTyping}
+            aria-label="Message"
           />
           <input
             type="file"
-            accept="image/*"
+            accept={ALLOWED_IMAGE_MIME.join(",")}
             className="hidden"
             ref={fileInputRef}
             onChange={handleImageChange}
           />
-
           <button
             type="button"
-            className={`hidden sm:flex btn btn-circle
-                     ${imagePreview ? "text-emerald-500" : "text-zinc-400"}`}
+            className={`hidden sm:flex btn btn-circle ${file ? "text-success" : "text-base-content/50"}`}
             onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach an image"
           >
             <Image size={20} />
           </button>
         </div>
         <button
           type="submit"
-          className="btn btn-circle"
-          disabled={!text.trim() && !imagePreview}
+          className="btn btn-circle btn-primary"
+          disabled={!canSend}
+          aria-label="Send"
         >
-          <Send size={22} />
+          {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={22} />}
         </button>
       </form>
     </div>
   );
 };
+
 export default MessageInput;

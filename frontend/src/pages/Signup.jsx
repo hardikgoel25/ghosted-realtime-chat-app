@@ -1,10 +1,18 @@
-import { useState } from "react";
-import { useAuthStore } from "../store/useAuthStore";
-import { Eye, EyeOff, Loader2, Lock, User, Ghost } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-
+import { Eye, EyeOff, Loader2, Lock, User, Ghost, Check, X } from "lucide-react";
+import { GENDERS, LIMITS, signupSchema, usernameSchema } from "@ghosted/shared";
+import { useAuthStore } from "../store/useAuthStore";
+import { api } from "../lib/api";
+import { useDebounce } from "../hooks/useDebounce";
 import AuthImagePattern from "../components/AuthImagePattern";
-import toast from "react-hot-toast";
+
+const GENDER_LABELS = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+  "prefer not to say": "Prefer not to say",
+};
 
 const SignUpPage = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -14,39 +22,61 @@ const SignUpPage = () => {
     password: "",
     gender: "",
   });
-
+  const [errors, setErrors] = useState({});
+  const [availability, setAvailability] = useState(null); // null | "checking" | "free" | "taken" | "invalid"
   const { signup, isSigningUp } = useAuthStore();
 
-  const validateForm = () => {
-    if (!formData.fullname.trim()) return toast.error("Full name is required");
-    if (!formData.username.trim()) return toast.error("Username is required");
-    if (!formData.password) return toast.error("Password is required");
-    if (formData.password.length < 8) return toast.error("Password must be at least 8 characters");
-    if (!formData.gender) return toast.error("Gender is required");
+  const debouncedUsername = useDebounce(formData.username, 400);
 
-    return true;
-  };
+  useEffect(() => {
+    if (!debouncedUsername.trim()) {
+      setAvailability(null);
+      return;
+    }
+    const parsed = usernameSchema.safeParse(debouncedUsername);
+    if (!parsed.success) {
+      setAvailability("invalid");
+      return;
+    }
+    let cancelled = false;
+    setAvailability("checking");
+    api
+      .get("/users/check-username", { params: { u: parsed.data }, silent: true })
+      .then(({ available }) => !cancelled && setAvailability(available ? "free" : "taken"))
+      .catch(() => !cancelled && setAvailability(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedUsername]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
-    const success = validateForm();
-
-    if (success === true) signup(formData);
+    const result = signupSchema.safeParse(formData);
+    if (!result.success) {
+      const next = {};
+      for (const issue of result.error.issues) next[issue.path[0]] ??= issue.message;
+      setErrors(next);
+      return;
+    }
+    setErrors({});
+    signup(result.data);
   };
+
+  const field = (name) => ({
+    value: formData[name],
+    onChange: (e) => {
+      setFormData({ ...formData, [name]: e.target.value });
+      if (errors[name]) setErrors({ ...errors, [name]: undefined });
+    },
+  });
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2 pt-16">
-      {/* left side */}
       <div className="flex flex-col justify-center items-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
-          {/* LOGO */}
           <div className="text-center mb-8">
             <div className="flex flex-col items-center gap-2 group">
-              <div
-                className="size-12 rounded-xl bg-primary/10 flex items-center justify-center 
-              group-hover:bg-primary/20 transition-colors"
-              >
+              <div className="size-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                 <Ghost className="size-6 text-primary" />
               </div>
               <h1 className="text-2xl font-bold mt-2">Create Account</h1>
@@ -54,9 +84,9 @@ const SignUpPage = () => {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="signup-fullname">
                 <span className="label-text font-medium">Full Name</span>
               </label>
               <div className="relative">
@@ -64,17 +94,20 @@ const SignUpPage = () => {
                   <User className="size-5 text-base-content/40" />
                 </div>
                 <input
+                  id="signup-fullname"
                   type="text"
-                  className="input input-bordered w-full pl-10"
+                  autoComplete="name"
+                  maxLength={LIMITS.FULLNAME_MAX}
+                  className={`input input-bordered w-full pl-10 ${errors.fullname ? "input-error" : ""}`}
                   placeholder="John Doe"
-                  value={formData.fullname}
-                  onChange={(e) => setFormData({ ...formData, fullname: e.target.value })}
+                  {...field("fullname")}
                 />
               </div>
+              {errors.fullname && <p className="text-error text-xs mt-1">{errors.fullname}</p>}
             </div>
 
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="signup-username">
                 <span className="label-text font-medium">Username</span>
               </label>
               <div className="relative">
@@ -82,35 +115,58 @@ const SignUpPage = () => {
                   <User className="size-5 text-base-content/40" />
                 </div>
                 <input
+                  id="signup-username"
                   type="text"
-                  className="input input-bordered w-full pl-10"
-                  placeholder="JohnDoe@123"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  maxLength={LIMITS.USERNAME_MAX}
+                  className={`input input-bordered w-full pl-10 pr-10 ${errors.username || availability === "taken" ? "input-error" : ""}`}
+                  placeholder="john_doe"
+                  {...field("username")}
                 />
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                  {availability === "checking" && (
+                    <Loader2 className="size-4 animate-spin text-base-content/40" />
+                  )}
+                  {availability === "free" && <Check className="size-4 text-success" />}
+                  {availability === "taken" && <X className="size-4 text-error" />}
+                </div>
               </div>
+              <p
+                className={`text-xs mt-1 ${errors.username || availability === "taken" ? "text-error" : "text-base-content/50"}`}
+              >
+                {errors.username ||
+                  (availability === "taken"
+                    ? "That username is already taken"
+                    : availability === "free"
+                      ? "Username is available"
+                      : "3–25 characters: lowercase letters, numbers, dots or underscores")}
+              </p>
             </div>
 
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="signup-gender">
                 <span className="label-text font-medium">Gender</span>
               </label>
               <select
-                className="select select-bordered w-full"
-                value={formData.gender}
-                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                id="signup-gender"
+                className={`select select-bordered w-full ${errors.gender ? "select-error" : ""}`}
+                {...field("gender")}
               >
                 <option value="" disabled>
                   Select gender
                 </option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
+                {GENDERS.map((g) => (
+                  <option key={g} value={g}>
+                    {GENDER_LABELS[g]}
+                  </option>
+                ))}
               </select>
+              {errors.gender && <p className="text-error text-xs mt-1">{errors.gender}</p>}
             </div>
 
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="signup-password">
                 <span className="label-text font-medium">Password</span>
               </label>
               <div className="relative">
@@ -118,16 +174,19 @@ const SignUpPage = () => {
                   <Lock className="size-5 text-base-content/40" />
                 </div>
                 <input
+                  id="signup-password"
                   type={showPassword ? "text" : "password"}
-                  className="input input-bordered w-full pl-10"
-                  placeholder="Password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  autoComplete="new-password"
+                  maxLength={LIMITS.PASSWORD_MAX}
+                  className={`input input-bordered w-full pl-10 pr-10 ${errors.password ? "input-error" : ""}`}
+                  placeholder="At least 8 characters"
+                  {...field("password")}
                 />
                 <button
                   type="button"
                   className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
                     <EyeOff className="size-5 text-base-content/40" />
@@ -136,13 +195,23 @@ const SignUpPage = () => {
                   )}
                 </button>
               </div>
+              <p
+                className={`text-xs mt-1 ${errors.password ? "text-error" : "text-base-content/50"}`}
+              >
+                {errors.password ||
+                  "Use a passphrase or a mix of words, numbers and symbols. Common passwords are rejected."}
+              </p>
             </div>
 
-            <button type="submit" className="btn btn-primary w-full" disabled={isSigningUp}>
+            <button
+              type="submit"
+              className="btn btn-primary w-full"
+              disabled={isSigningUp || availability === "taken"}
+            >
               {isSigningUp ? (
                 <>
                   <Loader2 className="size-5 animate-spin" />
-                  Loading...
+                  Creating account...
                 </>
               ) : (
                 "Create Account"
@@ -161,7 +230,6 @@ const SignUpPage = () => {
         </div>
       </div>
 
-      {/* right side */}
       <AuthImagePattern
         title="Join our community"
         subtitle="Connect with friends, share moments, and stay in touch with your loved ones."

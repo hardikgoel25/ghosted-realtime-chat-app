@@ -1,38 +1,26 @@
-import { useState, useEffect } from "react";
-import { useAuthStore } from "../store/useAuthStore";
-import AuthImagePattern from "../components/AuthImagePattern";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Lock, User, Ghost } from "lucide-react";
+import { useAuthStore } from "../store/useAuthStore";
+import AuthImagePattern from "../components/AuthImagePattern";
 
 const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    username: "",
-    password: "",
-  });
-  const { login, isLoggingIn, showEnableAccountPrompt, cachedLoginUsername } = useAuthStore();
+  const [formData, setFormData] = useState({ username: "", password: "" });
+  const { login, isLoggingIn, disabledUsername } = useAuthStore();
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    const processedData = {
-      ...formData,
-      username: formData.username.toLowerCase(),
-    };
-    login(processedData);
+    login({ username: formData.username.trim(), password: formData.password });
   };
 
   return (
-    <div className="h-screen grid lg:grid-cols-2">
-      {/* Left Side - Form */}
+    <div className="min-h-screen grid lg:grid-cols-2 pt-16">
       <div className="flex flex-col justify-center items-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
-          {/* Logo */}
           <div className="text-center mb-8">
             <div className="flex flex-col items-center gap-2 group">
-              <div
-                className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20
-              transition-colors"
-              >
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                 <Ghost className="w-6 h-6 text-primary" />
               </div>
               <h1 className="text-2xl font-bold mt-2">Welcome Back</h1>
@@ -40,20 +28,21 @@ const Login = () => {
             </div>
           </div>
 
-          {/* Enable Account Prompt */}
-          {showEnableAccountPrompt && (
-            <div className="p-4 mb-4 border border-yellow-400 bg-yellow-50 text-yellow-700 rounded">
-              Your account <strong>{cachedLoginUsername}</strong> has been disabled.{" "}
-              <Link to="/enable-account" className="underline text-primary">
-                Click here to enable your account.
-              </Link>
+          {disabledUsername && (
+            <div role="alert" className="alert alert-warning text-sm">
+              <span>
+                The account <strong>{disabledUsername}</strong> is disabled.{" "}
+                <Link to="/enable-account" className="link font-medium">
+                  Re-enable it
+                </Link>{" "}
+                to continue.
+              </span>
             </div>
           )}
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="login-username">
                 <span className="label-text font-medium">Username</span>
               </label>
               <div className="relative">
@@ -61,17 +50,21 @@ const Login = () => {
                   <User className="h-5 w-5 text-base-content/40" />
                 </div>
                 <input
+                  id="login-username"
                   type="text"
+                  autoComplete="username"
+                  autoCapitalize="none"
                   className="input input-bordered w-full pl-10"
                   placeholder="john_doe"
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  required
                 />
               </div>
             </div>
 
             <div className="form-control">
-              <label className="label">
+              <label className="label" htmlFor="login-password">
                 <span className="label-text font-medium">Password</span>
               </label>
               <div className="relative">
@@ -79,16 +72,20 @@ const Login = () => {
                   <Lock className="h-5 w-5 text-base-content/40" />
                 </div>
                 <input
+                  id="login-password"
                   type={showPassword ? "text" : "password"}
-                  className="input input-bordered w-full pl-10"
+                  autoComplete="current-password"
+                  className="input input-bordered w-full pl-10 pr-10"
                   placeholder="Password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  required
                 />
                 <button
                   type="button"
                   className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
                     <EyeOff className="h-5 w-5 text-base-content/40" />
@@ -103,7 +100,7 @@ const Login = () => {
               {isLoggingIn ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading...
+                  Signing in...
                 </>
               ) : (
                 "Sign in"
@@ -122,10 +119,9 @@ const Login = () => {
         </div>
       </div>
 
-      {/* Right Side - Image/Pattern */}
       <AuthImagePattern
-        title={"Welcome back!"}
-        subtitle={"Sign in to continue your conversations and catch up with your messages."}
+        title="Welcome back!"
+        subtitle="Sign in to continue your conversations and catch up with your messages."
       />
     </div>
   );
