@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import mongoose from "mongoose";
-import { ORIGIN, PASSWORD, agent, app, parseSetCookies, signup, uniqueUser } from "./helpers.js";
+import {
+  ORIGIN,
+  PASSWORD,
+  agent,
+  app,
+  openDirect,
+  parseSetCookies,
+  sendText,
+  signup,
+  uniqueUser,
+} from "./helpers.js";
 
 const BCRYPT_HASH = /\$2[aby]\$\d{2}\$/;
 
@@ -267,7 +277,9 @@ describe("auth: disable, enable, delete", () => {
     const { user, username } = await signup(a);
     const b = agent();
     const { user: other } = await signup(b);
-    await a.post(`/api/v1/messages/${other._id}`).send({ text: "hello" });
+    const conv = await openDirect(a, other._id);
+    await sendText(a, conv._id, "hello");
+    await sendText(b, conv._id, "hello back");
 
     expect(
       (await a.delete("/api/v1/auth/account").send({ password: "wrong-wrong-1" })).status
@@ -280,8 +292,14 @@ describe("auth: disable, enable, delete", () => {
     expect(
       await mongoose.connection.db
         .collection("messages")
-        .countDocuments({ senderId: new mongoose.Types.ObjectId(user._id) })
+        .countDocuments({ conversationId: new mongoose.Types.ObjectId(conv._id) })
     ).toBe(0);
+    expect(
+      await mongoose.connection.db
+        .collection("conversations")
+        .countDocuments({ "participants.userId": new mongoose.Types.ObjectId(user._id) })
+    ).toBe(0);
+    expect((await b.get("/api/v1/conversations")).body.data.items).toHaveLength(0);
     expect(
       (await agent().post("/api/v1/auth/login").send({ username, password: PASSWORD })).status
     ).toBe(401);

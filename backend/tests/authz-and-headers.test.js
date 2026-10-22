@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { PASSWORD, agent, app, cookieHeaderFrom, signup } from "./helpers.js";
+import { PASSWORD, agent, app, cookieHeaderFrom, openDirect, sendText, signup } from "./helpers.js";
 
 describe("authorization", () => {
-  it("requires authentication for users and messages", async () => {
+  it("requires authentication for users and conversations", async () => {
     expect((await agent().get("/api/v1/users")).status).toBe(401);
-    expect((await agent().get("/api/v1/messages/64b000000000000000000000")).status).toBe(401);
+    expect((await agent().get("/api/v1/conversations")).status).toBe(401);
     expect(
-      (await agent().post("/api/v1/messages/64b000000000000000000000").send({ text: "x" })).status
+      (
+        await agent()
+          .post("/api/v1/conversations/direct")
+          .send({ userId: "64b000000000000000000000" })
+      ).status
     ).toBe(401);
+    expect((await sendText(agent(), "64b000000000000000000000", "x")).status).toBe(401);
   });
 
   it("refuses messages to disabled users and invalidates a disabled user's own session", async () => {
@@ -17,26 +22,33 @@ describe("authorization", () => {
     const b = agent();
     const { user: bob, res: bobSignup } = await signup(b);
     const bobCookie = cookieHeaderFrom(bobSignup);
+    const conv = await openDirect(a, bob._id);
+    await sendText(a, conv._id, "before");
 
     await b.post("/api/v1/auth/disable").send({ password: PASSWORD });
 
-    const send = await a.post(`/api/v1/messages/${bob._id}`).send({ text: "anyone there?" });
-    expect(send.status).toBe(403);
-    const list = await a.get(`/api/v1/messages/${bob._id}`);
-    expect(list.status).toBe(403);
+    expect((await sendText(a, conv._id, "anyone there?")).status).toBe(403);
+    expect((await a.get(`/api/v1/conversations/${conv._id}/messages`)).status).toBe(200);
 
-    const stale = await request(app()).get("/api/v1/users").set("Cookie", bobCookie);
+    const stale = await request(app()).get("/api/v1/conversations").set("Cookie", bobCookie);
     expect(stale.status).toBe(401);
   });
 
-  it("answers 404 for deleted users", async () => {
+  it("removes direct conversations of deleted users", async () => {
     const a = agent();
     await signup(a);
     const g = agent();
     const { user: gone } = await signup(g);
+    const conv = await openDirect(a, gone._id);
+    await sendText(a, conv._id, "hi");
     await g.delete("/api/v1/auth/account").send({ password: PASSWORD });
-    expect((await a.post(`/api/v1/messages/${gone._id}`).send({ text: "hi" })).status).toBe(404);
+
+    expect((await a.get(`/api/v1/conversations/${conv._id}`)).status).toBe(404);
+    expect((await a.post("/api/v1/conversations/direct").send({ userId: gone._id })).status).toBe(
+      404
+    );
     expect((await a.get(`/api/v1/users/${gone.username}`)).status).toBe(404);
+    expect((await a.get("/api/v1/conversations")).body.data.items).toHaveLength(0);
   });
 });
 
@@ -46,9 +58,11 @@ describe("CSRF origin check", () => {
     const { user: other } = await signup(agent());
     const { res: signupRes } = await signup(a);
     const cookie = cookieHeaderFrom(signupRes);
+    const conv = await openDirect(a, other._id);
+    const url = `/api/v1/conversations/${conv._id}/messages`;
 
     const foreign = await request(app())
-      .post(`/api/v1/messages/${other._id}`)
+      .post(url)
       .set("Cookie", cookie)
       .set("Origin", "https://evil.example")
       .send({ text: "csrf" });
@@ -56,21 +70,21 @@ describe("CSRF origin check", () => {
     expect(foreign.body.error.code).toBe("CSRF_ORIGIN_MISMATCH");
 
     const crossSite = await request(app())
-      .post(`/api/v1/messages/${other._id}`)
+      .post(url)
       .set("Cookie", cookie)
       .set("Sec-Fetch-Site", "cross-site")
       .send({ text: "csrf" });
     expect(crossSite.status).toBe(403);
 
     const refererOnly = await request(app())
-      .post(`/api/v1/messages/${other._id}`)
+      .post(url)
       .set("Cookie", cookie)
       .set("Referer", "https://evil.example/page")
       .send({ text: "csrf" });
     expect(refererOnly.status).toBe(403);
 
     const allowed = await request(app())
-      .post(`/api/v1/messages/${other._id}`)
+      .post(url)
       .set("Cookie", cookie)
       .set("Origin", "http://localhost:5173")
       .send({ text: "legit" });

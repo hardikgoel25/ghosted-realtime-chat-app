@@ -7,8 +7,9 @@ import { socketAuth } from "./auth.js";
 import { setIo } from "./io.js";
 import { userRoom } from "./emit.js";
 import { registerTypingHandlers } from "./handlers/typing.js";
+import { registerConversationHandlers } from "./handlers/conversations.js";
 
-const EVENT_BUDGET = 40; // events per window per socket
+const EVENT_BUDGET = 60; // events per window per socket
 const EVENT_WINDOW_MS = 10_000;
 
 function packetRateLimiter(socket) {
@@ -60,6 +61,7 @@ export function createSocketServer(httpServer) {
     );
 
     registerTypingHandlers(socket);
+    registerConversationHandlers(socket);
 
     socket.on("disconnect", (reason) => {
       const wentOffline = presence.removeSocket(userId, socket.id);

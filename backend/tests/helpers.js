@@ -41,6 +41,18 @@ export async function signup(a, overrides = {}) {
   return { ...data, user: res.body.data.user, res };
 }
 
+export async function openDirect(a, otherUserId) {
+  const res = await a.post("/api/v1/conversations/direct").send({ userId: otherUserId });
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`openDirect failed (${res.status}): ${JSON.stringify(res.body)}`);
+  }
+  return res.body.data.conversation;
+}
+
+export function sendText(a, conversationId, text, extra = {}) {
+  return a.post(`/api/v1/conversations/${conversationId}/messages`).send({ text, ...extra });
+}
+
 export function parseSetCookies(res) {
   const out = {};
   for (const raw of res.headers["set-cookie"] ?? []) {

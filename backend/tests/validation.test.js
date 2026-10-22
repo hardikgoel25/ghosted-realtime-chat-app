@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, signup } from "./helpers.js";
+import { agent, openDirect, sendText, signup } from "./helpers.js";
 
 describe("validation and error envelope", () => {
   it("returns a JSON 404 envelope for unknown routes", async () => {
@@ -23,42 +23,41 @@ describe("validation and error envelope", () => {
   it("validates route ids instead of throwing CastErrors", async () => {
     const a = agent();
     await signup(a);
-    const res = await a.get("/api/v1/messages/not-an-object-id");
+    const res = await a.get("/api/v1/conversations/not-an-object-id/messages");
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    expect((await a.post("/api/v1/conversations/direct").send({ userId: "nope" })).status).toBe(
+      400
+    );
   });
 
   it("bounds pagination parameters", async () => {
     const a = agent();
     await signup(a);
     const { user: other } = await signup(agent());
-    const tooMany = await a.get(`/api/v1/messages/${other._id}?limit=500`);
-    expect(tooMany.status).toBe(400);
-    const badCursor = await a.get(`/api/v1/messages/${other._id}?cursor=zzz`);
-    expect(badCursor.status).toBe(400);
+    const conv = await openDirect(a, other._id);
+    expect((await a.get(`/api/v1/conversations/${conv._id}/messages?limit=500`)).status).toBe(400);
+    expect((await a.get(`/api/v1/conversations/${conv._id}/messages?cursor=zzz`)).status).toBe(400);
+    expect((await a.get("/api/v1/conversations?limit=0")).status).toBe(400);
+    expect((await a.get("/api/v1/conversations?filter=weird")).status).toBe(400);
   });
 
   it("rejects empty, oversized and self-addressed messages and unknown fields", async () => {
     const a = agent();
     const { user: me } = await signup(a);
     const { user: other } = await signup(agent());
+    const conv = await openDirect(a, other._id);
 
-    expect((await a.post(`/api/v1/messages/${other._id}`).send({})).status).toBe(400);
-    expect((await a.post(`/api/v1/messages/${other._id}`).send({ text: "   " })).status).toBe(400);
+    expect((await a.post(`/api/v1/conversations/${conv._id}/messages`).send({})).status).toBe(400);
+    expect((await sendText(a, conv._id, "   ")).status).toBe(400);
+    expect((await sendText(a, conv._id, "x".repeat(4001))).status).toBe(400);
+    expect((await a.post("/api/v1/conversations/direct").send({ userId: me._id })).status).toBe(
+      400
+    );
     expect(
-      (await a.post(`/api/v1/messages/${other._id}`).send({ text: "x".repeat(4001) })).status
+      (await sendText(a, conv._id, "hi", { image: "data:image/png;base64,AAAA" })).status
     ).toBe(400);
-    expect((await a.post(`/api/v1/messages/${me._id}`).send({ text: "hi me" })).status).toBe(400);
-    expect(
-      (
-        await a
-          .post(`/api/v1/messages/${other._id}`)
-          .send({ text: "hi", image: "data:image/png;base64,AAAA" })
-      ).status
-    ).toBe(400);
-    expect(
-      (await a.post(`/api/v1/messages/${other._id}`).send({ text: "hi", clientId: "nope" })).status
-    ).toBe(400);
+    expect((await sendText(a, conv._id, "hi", { clientId: "nope" })).status).toBe(400);
   });
 
   it("rejects the old base64 profilePic field and unknown keys on profile updates", async () => {

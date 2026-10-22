@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { LIMITS } from "@ghosted/shared";
-import { agent, signup } from "./helpers.js";
+import { agent, openDirect, sendText, signup } from "./helpers.js";
 
 const { destroy, deleteResources } = vi.hoisted(() => ({
   destroy: vi.fn(async () => ({ result: "ok" })),
@@ -10,12 +10,14 @@ const { destroy, deleteResources } = vi.hoisted(() => ({
 
 vi.mock("../src/config/cloudinary.js", async () => {
   const { Writable } = await import("node:stream");
+  let counter = 0;
   return {
     cloudinaryConfigured: true,
     cloudinary: {
       uploader: {
         upload_stream: (options, cb) => {
           const chunks = [];
+          const n = ++counter;
           return new Writable({
             write(chunk, _enc, next) {
               chunks.push(chunk);
@@ -24,8 +26,8 @@ vi.mock("../src/config/cloudinary.js", async () => {
             final(done) {
               const bytes = Buffer.concat(chunks).length;
               cb(null, {
-                secure_url: `https://res.cloudinary.com/test/image/upload/${options.folder}/asset.webp`,
-                public_id: `${options.folder}/asset`,
+                secure_url: `https://res.cloudinary.com/test/image/upload/${options.folder}/asset-${n}.webp`,
+                public_id: `${options.folder}/asset-${n}`,
                 bytes,
                 format: "webp",
               });
@@ -57,12 +59,12 @@ describe("uploads", () => {
     expect(res.body.data.user.avatar.url).toMatch(
       /^https:\/\/res\.cloudinary\.com\/test\/image\/upload\/ghosted\/test\/avatars\//
     );
-    expect(res.body.data.user.avatar.publicId).toBe("ghosted/test/avatars/asset");
+    expect(res.body.data.user.avatar.publicId).toMatch(/^ghosted\/test\/avatars\/asset-\d+$/);
 
     const removed = await a.delete("/api/v1/users/me/avatar");
     expect(removed.status).toBe(200);
     expect(removed.body.data.user.avatar.url).toMatch(/^data:image\/svg\+xml/);
-    expect(destroy).toHaveBeenCalledWith("ghosted/test/avatars/asset", expect.anything());
+    expect(destroy).toHaveBeenCalledWith(res.body.data.user.avatar.publicId, expect.anything());
   });
 
   it("rejects files whose bytes are not an image even if they claim an image MIME type", async () => {
@@ -99,30 +101,47 @@ describe("uploads", () => {
     expect(huge.status).toBe(413);
   });
 
-  it("sends an image message through multipart and ignores client-supplied URLs", async () => {
+  it("sends image messages through multipart (up to the limit) and ignores client-supplied URLs", async () => {
     const a = agent();
     await signup(a);
     const { user: other } = await signup(agent());
+    const conv = await openDirect(a, other._id);
+    const url = `/api/v1/conversations/${conv._id}/messages`;
 
     const res = await a
-      .post(`/api/v1/messages/${other._id}`)
+      .post(url)
       .field("text", "look at this")
-      .attach("image", await pngBuffer(), { filename: "pic.png", contentType: "image/png" });
+      .attach("images", await pngBuffer(), { filename: "pic.png", contentType: "image/png" });
     expect(res.status).toBe(201);
+    expect(res.body.data.message.type).toBe("image");
     expect(res.body.data.message.text).toBe("look at this");
-    expect(res.body.data.message.image).toMatch(
-      /^https:\/\/res\.cloudinary\.com\/test\/image\/upload\/ghosted\/test\/messages\//
-    );
+    expect(res.body.data.message.attachments).toHaveLength(1);
+    expect(res.body.data.message.attachments[0].url).toMatch(/ghosted\/test\/messages\//);
+    expect(res.body.data.message.attachments[0]).not.toHaveProperty("publicId");
 
-    const imageOnly = await a
-      .post(`/api/v1/messages/${other._id}`)
-      .attach("image", await pngBuffer(), { filename: "pic.png", contentType: "image/png" });
-    expect(imageOnly.status).toBe(201);
-    expect(imageOnly.body.data.message.text).toBe("");
+    const two = await a
+      .post(url)
+      .attach("images", await pngBuffer(), { filename: "a.png", contentType: "image/png" })
+      .attach("images", await pngBuffer(), { filename: "b.png", contentType: "image/png" });
+    expect(two.status).toBe(201);
+    expect(two.body.data.message.attachments).toHaveLength(2);
+    expect(two.body.data.message.text).toBe("");
 
-    const remoteUrl = await a
-      .post(`/api/v1/messages/${other._id}`)
-      .send({ text: "fetch this", image: "https://example.com/secret.png" });
+    let tooMany = a.post(url);
+    for (let i = 0; i <= LIMITS.MESSAGE_IMAGES_MAX; i++) {
+      tooMany = tooMany.attach("images", await pngBuffer(), {
+        filename: `${i}.png`,
+        contentType: "image/png",
+      });
+    }
+    expect((await tooMany).status).toBe(400);
+
+    const remoteUrl = await sendText(a, conv._id, "fetch this", {
+      image: "https://example.com/secret.png",
+    });
     expect(remoteUrl.status).toBe(400);
+
+    const list = await a.get("/api/v1/conversations");
+    expect(list.body.data.items[0].lastMessage.hasAttachments).toBe(true);
   });
 });

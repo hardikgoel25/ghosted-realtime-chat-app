@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { agent, signup } from "./helpers.js";
+import { agent, openDirect, sendText, signup } from "./helpers.js";
 
 // Limits are evaluated per request, so a file can switch them on only for the calls under test
 const enableLimits = () => {
@@ -36,13 +36,14 @@ describe("rate limiting", () => {
     const a = agent();
     await signup(a);
     const { user: other } = await signup(agent());
+    const conv = await openDirect(a, other._id);
     enableLimits();
 
     for (let i = 0; i < 30; i++) {
-      const res = await a.post(`/api/v1/messages/${other._id}`).send({ text: `m${i}` });
+      const res = await sendText(a, conv._id, `m${i}`);
       expect(res.status, `message ${i + 1}`).toBe(201);
     }
-    const blocked = await a.post(`/api/v1/messages/${other._id}`).send({ text: "one too many" });
+    const blocked = await sendText(a, conv._id, "one too many");
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.code).toBe("RATE_LIMITED");
   });

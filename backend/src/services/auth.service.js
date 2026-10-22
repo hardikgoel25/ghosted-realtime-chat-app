@@ -7,6 +7,7 @@ import { sessionOptions, withTransaction } from "../config/db.js";
 import User from "../models/user.model.js";
 import Session from "../models/session.model.js";
 import Message from "../models/message.model.js";
+import Conversation from "../models/conversation.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { initialsAvatar } from "../utils/avatar.js";
 import * as tokens from "./token.service.js";
@@ -190,21 +191,36 @@ export async function deleteAccount(user, { password }) {
   const doc = await assertPassword(user, password);
   const userId = doc._id;
 
-  const imageIds = await Message.distinct("imagePublicId", {
-    $or: [{ senderId: userId }, { receiverId: userId }],
-    imagePublicId: { $ne: null },
+  // Direct conversations die with the account; group memberships are left for Phase 3
+  const conversationIds = await Conversation.distinct("_id", {
+    type: "direct",
+    "participants.userId": userId,
+  });
+  const imageIds = await Message.distinct("attachments.publicId", {
+    $or: [{ conversationId: { $in: conversationIds } }, { senderId: userId }],
+    "attachments.publicId": { $ne: null },
   });
 
   await withTransaction(async (session) => {
     const opts = sessionOptions(session);
-    await Message.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] }, opts);
+    await Message.deleteMany(
+      { $or: [{ conversationId: { $in: conversationIds } }, { senderId: userId }] },
+      opts
+    );
+    await Conversation.deleteMany({ _id: { $in: conversationIds } }, opts);
     await Session.deleteMany({ userId }, opts);
     await User.deleteOne({ _id: userId }, opts);
   });
 
   await disconnectUserSockets(userId);
-  broadcast(SOCKET_EVENTS.USER_DELETED, { userId: String(userId) });
-  logger.info({ userId: String(userId), messagesImages: imageIds.length }, "Account deleted");
+  broadcast(SOCKET_EVENTS.USER_DELETED, {
+    userId: String(userId),
+    conversationIds: conversationIds.map(String),
+  });
+  logger.info(
+    { userId: String(userId), conversations: conversationIds.length, images: imageIds.length },
+    "Account deleted"
+  );
 
   // Best-effort media cleanup after the data is gone; failures only leave orphaned assets
   void media.destroyImages([doc.avatar?.publicId, ...imageIds]);

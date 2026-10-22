@@ -1,29 +1,57 @@
-import { SOCKET_EVENTS, typingEventSchema } from "@ghosted/shared";
+import { SOCKET_EVENTS, conversationTypingSchema } from "@ghosted/shared";
+import { participantIdsOf } from "../../services/conversation.service.js";
 import { emitToUser } from "../emit.js";
 
 const TYPING_THROTTLE_MS = 2000;
 
+/** Participants of conversations this socket has touched, so typing does not hit the DB. */
+export function conversationCache(socket) {
+  socket.data.participantsByConversation ??= new Map();
+  return socket.data.participantsByConversation;
+}
+
+async function participantsFor(socket, conversationId) {
+  const cache = conversationCache(socket);
+  if (cache.has(conversationId)) return cache.get(conversationId);
+  const ids = await participantIdsOf(conversationId, socket.data.userId);
+  if (ids) cache.set(conversationId, ids);
+  return ids;
+}
+
 export function registerTypingHandlers(socket) {
-  const lastSent = new Map(); // receiverId -> timestamp of the last typing:start relayed
+  const lastSent = new Map(); // conversationId -> timestamp of the last typing:start relayed
   const { userId } = socket.data;
 
-  socket.on(SOCKET_EVENTS.TYPING_START, (payload, ack) => {
-    const parsed = typingEventSchema.safeParse(payload);
+  const relay = (conversationId, participants, isTyping) => {
+    for (const id of participants) {
+      if (id === userId) continue;
+      emitToUser(id, SOCKET_EVENTS.TYPING, { conversationId, userId, isTyping });
+    }
+  };
+
+  socket.on(SOCKET_EVENTS.TYPING_START, async (payload, ack) => {
+    const parsed = conversationTypingSchema.safeParse(payload);
     if (!parsed.success) return ack?.({ ok: false, error: "VALIDATION_ERROR" });
-    const { to } = parsed.data;
+    const { conversationId } = parsed.data;
     const now = Date.now();
-    if (now - (lastSent.get(to) ?? 0) < TYPING_THROTTLE_MS)
+    if (now - (lastSent.get(conversationId) ?? 0) < TYPING_THROTTLE_MS) {
       return ack?.({ ok: true, throttled: true });
-    lastSent.set(to, now);
-    emitToUser(to, SOCKET_EVENTS.TYPING, { from: userId, isTyping: true });
+    }
+    const participants = await participantsFor(socket, conversationId);
+    if (!participants) return ack?.({ ok: false, error: "NOT_FOUND" });
+    lastSent.set(conversationId, now);
+    relay(conversationId, participants, true);
     ack?.({ ok: true });
   });
 
-  socket.on(SOCKET_EVENTS.TYPING_STOP, (payload, ack) => {
-    const parsed = typingEventSchema.safeParse(payload);
+  socket.on(SOCKET_EVENTS.TYPING_STOP, async (payload, ack) => {
+    const parsed = conversationTypingSchema.safeParse(payload);
     if (!parsed.success) return ack?.({ ok: false, error: "VALIDATION_ERROR" });
-    lastSent.delete(parsed.data.to);
-    emitToUser(parsed.data.to, SOCKET_EVENTS.TYPING, { from: userId, isTyping: false });
+    const { conversationId } = parsed.data;
+    const participants = await participantsFor(socket, conversationId);
+    if (!participants) return ack?.({ ok: false, error: "NOT_FOUND" });
+    lastSent.delete(conversationId);
+    relay(conversationId, participants, false);
     ack?.({ ok: true });
   });
 

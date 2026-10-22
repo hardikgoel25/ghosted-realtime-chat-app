@@ -37,6 +37,8 @@ export function createApp() {
       },
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return "error";
+        // A missing/expired session on page load is routine, not a warning
+        if (res.statusCode === 401) return "info";
         if (res.statusCode >= 400) return "warn";
         return "info";
       },

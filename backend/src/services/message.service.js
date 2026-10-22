@@ -1,31 +1,33 @@
 import { SOCKET_EVENTS, USER_STATUS } from "@ghosted/shared";
-import User from "../models/user.model.js";
+import Conversation from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { serializeMessage } from "../utils/serializers.js";
 import * as media from "./media.service.js";
+import * as presence from "./presence.service.js";
+import {
+  broadcastConversation,
+  idOf,
+  loadForMember,
+  otherParticipants,
+} from "./conversation.service.js";
 import { emitToUser } from "../sockets/emit.js";
 
-async function requireCounterpart(me, otherId) {
-  if (String(otherId) === String(me._id)) {
-    throw ApiError.badRequest("You cannot message yourself");
+function assertCounterpartsAvailable(conversation, me) {
+  for (const p of otherParticipants(conversation, me._id)) {
+    const user = p.userId && typeof p.userId === "object" ? p.userId : null;
+    if (!user || user.status === USER_STATUS.DELETED) throw ApiError.notFound("User not found");
+    if (user.status === USER_STATUS.DISABLED) {
+      throw ApiError.forbidden("This user is currently unavailable");
+    }
   }
-  const other = await User.findById(otherId).select("status").lean();
-  if (!other || other.status === USER_STATUS.DELETED) throw ApiError.notFound("User not found");
-  if (other.status === USER_STATUS.DISABLED) {
-    throw ApiError.forbidden("This user is currently unavailable");
-  }
-  return other;
 }
 
-export async function listMessages(me, otherId, { cursor, limit }) {
-  await requireCounterpart(me, otherId);
-  const filter = {
-    $or: [
-      { senderId: me._id, receiverId: otherId },
-      { senderId: otherId, receiverId: me._id },
-    ],
-  };
+export async function listMessages(me, conversationId, { cursor, limit }) {
+  const conversation = await loadForMember(me._id, conversationId);
+  const mine = conversation.participants.find((p) => idOf(p.userId) === idOf(me._id));
+  const filter = { conversationId: conversation._id };
+  if (mine?.clearedAt) filter.createdAt = { $gt: mine.clearedAt };
   if (cursor) filter._id = { $lt: cursor };
 
   const docs = await Message.find(filter)
@@ -40,47 +42,109 @@ export async function listMessages(me, otherId, { cursor, limit }) {
   };
 }
 
-export async function sendMessage(sender, receiverId, { text = "", clientId }, file) {
-  await requireCounterpart(sender, receiverId);
-  if (!text && !file) throw ApiError.badRequest("Message must contain text or an image");
+async function applySendToConversation(conversation, message, { senderId, onlineIds }) {
+  const createdAt = message.createdAt;
+  const others = otherParticipants(conversation, senderId).map((p) => idOf(p.userId));
+  const $inc = Object.fromEntries(others.map((id) => [`unread.${id}`, 1]));
+  const online = others.filter((id) => onlineIds.includes(id));
+
+  return Conversation.findOneAndUpdate(
+    { _id: conversation._id },
+    {
+      $set: {
+        lastMessage: {
+          _id: message._id,
+          senderId: message.senderId,
+          type: message.type,
+          text: message.text,
+          hasAttachments: message.attachments.length > 0,
+          createdAt,
+        },
+        lastMessageAt: createdAt,
+        // A new message brings an archived chat back for everyone
+        "participants.$[all].archived": false,
+      },
+      $max: {
+        "participants.$[sender].lastReadAt": createdAt,
+        "participants.$[sender].lastDeliveredAt": createdAt,
+        "participants.$[online].lastDeliveredAt": createdAt,
+      },
+      ...(others.length ? { $inc } : {}),
+    },
+    {
+      new: true,
+      arrayFilters: [
+        { "all.userId": { $exists: true } },
+        { "sender.userId": senderId },
+        { "online.userId": { $in: online } },
+      ],
+    }
+  ).populate("participants.userId");
+}
+
+export async function sendMessage(me, conversationId, { text = "", clientId }, files = []) {
+  const conversation = await loadForMember(me._id, conversationId);
+  assertCounterpartsAvailable(conversation, me);
+  if (!text && files.length === 0) {
+    throw ApiError.badRequest("Message must contain text or an image");
+  }
 
   if (clientId) {
-    const existing = await Message.findOne({ senderId: sender._id, clientId }).lean();
+    const existing = await Message.findOne({ senderId: me._id, clientId }).lean();
     if (existing) return { message: serializeMessage(existing), duplicate: true };
   }
 
-  let image = null;
-  let imagePublicId = null;
-  if (file) {
+  const attachments = [];
+  for (const file of files) {
     const uploaded = await media.uploadImage(file.buffer, { folder: "messages" });
-    image = uploaded.url;
-    imagePublicId = uploaded.publicId;
+    attachments.push({
+      url: uploaded.url,
+      publicId: uploaded.publicId,
+      mime: "image/webp",
+      size: uploaded.bytes,
+      width: uploaded.width,
+      height: uploaded.height,
+      name: file.originalname?.slice(0, 120) ?? null,
+    });
   }
 
   let doc;
   try {
     doc = await Message.create({
-      senderId: sender._id,
-      receiverId,
-      text,
-      image,
-      imagePublicId,
+      conversationId: conversation._id,
+      senderId: me._id,
       clientId: clientId ?? null,
+      type: attachments.length ? "image" : "text",
+      text,
+      attachments,
     });
   } catch (err) {
     if (err?.code === 11000 && clientId) {
-      const existing = await Message.findOne({ senderId: sender._id, clientId }).lean();
+      const existing = await Message.findOne({ senderId: me._id, clientId }).lean();
       if (existing) {
-        if (imagePublicId) void media.destroyImage(imagePublicId);
+        void media.destroyImages(attachments.map((a) => a.publicId));
         return { message: serializeMessage(existing), duplicate: true };
       }
     }
     throw err;
   }
 
+  const onlineIds = otherParticipants(conversation, me._id)
+    .map((p) => idOf(p.userId))
+    .filter((id) => presence.isOnline(id));
+  const updated = await applySendToConversation(conversation, doc, {
+    senderId: me._id,
+    onlineIds,
+  });
+
   const payload = serializeMessage(doc);
-  emitToUser(receiverId, SOCKET_EVENTS.MESSAGE_NEW, payload);
-  // The sender's other devices receive it too; the originating tab dedupes by _id
-  emitToUser(sender._id, SOCKET_EVENTS.MESSAGE_NEW, payload);
+  for (const p of updated.participants) {
+    emitToUser(idOf(p.userId), SOCKET_EVENTS.MESSAGE_NEW, {
+      conversationId: String(updated._id),
+      message: payload,
+    });
+  }
+  broadcastConversation(updated);
+
   return { message: payload, duplicate: false };
 }

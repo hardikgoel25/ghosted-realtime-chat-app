@@ -1,0 +1,69 @@
+import * as conversationService from "../services/conversation.service.js";
+import * as messageService from "../services/message.service.js";
+import { ok } from "../utils/response.js";
+import { serializeConversation } from "../utils/serializers.js";
+
+export async function list(req, res) {
+  const page = await conversationService.listConversations(req.user, req.validated.query);
+  ok(res, page);
+}
+
+export async function createDirect(req, res) {
+  const { conversation, created } = await conversationService.findOrCreateDirect(
+    req.user,
+    req.validated.body.userId
+  );
+  ok(res, { conversation: serializeConversation(conversation, req.user) }, created ? 201 : 200);
+}
+
+export async function get(req, res) {
+  const conversation = await conversationService.getConversation(
+    req.user,
+    req.validated.params.conversationId
+  );
+  ok(res, { conversation });
+}
+
+export async function updateFlags(req, res) {
+  const conversation = await conversationService.updateFlags(
+    req.user,
+    req.validated.params.conversationId,
+    req.validated.body
+  );
+  ok(res, { conversation });
+}
+
+export async function markRead(req, res) {
+  const conversation = await conversationService.markRead(
+    req.user,
+    req.validated.params.conversationId
+  );
+  ok(res, { conversation });
+}
+
+export async function clear(req, res) {
+  const conversation = await conversationService.clearForMe(
+    req.user,
+    req.validated.params.conversationId
+  );
+  ok(res, { conversation });
+}
+
+export async function listMessages(req, res) {
+  const page = await messageService.listMessages(
+    req.user,
+    req.validated.params.conversationId,
+    req.validated.query
+  );
+  ok(res, page);
+}
+
+export async function sendMessage(req, res) {
+  const { message, duplicate } = await messageService.sendMessage(
+    req.user,
+    req.validated.params.conversationId,
+    req.validated.body,
+    req.files ?? []
+  );
+  ok(res, { message }, duplicate ? 200 : 201);
+}

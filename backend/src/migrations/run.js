@@ -3,8 +3,9 @@ import mongoose from "mongoose";
 import { connectDb, disconnectDb } from "../config/db.js";
 import { logger } from "../config/logger.js";
 import * as m001 from "./001-users.js";
+import * as m002 from "./002-conversations.js";
 
-export const MIGRATIONS = [m001];
+export const MIGRATIONS = [m001, m002];
 
 export async function runMigrations({ dryRun = false, force = false } = {}) {
   const db = mongoose.connection.db;

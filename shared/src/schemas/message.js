@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LIMITS } from "../constants.js";
-import { cursorSchema, limitSchema, objectIdSchema } from "./common.js";
+import { cursorSchema, limitSchema } from "./common.js";
 
 export const messageTextSchema = z
   .string()
@@ -15,8 +15,4 @@ export const sendMessageSchema = z.strictObject({
 export const listMessagesQuerySchema = z.object({
   cursor: cursorSchema,
   limit: limitSchema,
-});
-
-export const typingEventSchema = z.strictObject({
-  to: objectIdSchema,
 });
