@@ -78,11 +78,19 @@ export const useConversationStore = create((set, get) => ({
     }
   },
 
+  /** Socket updates carry no block state, so the last known value is kept. */
   upsert: (conversation) =>
-    set((s) => ({
-      byId: { ...s.byId, [conversation._id]: conversation },
-      lists: placeInLists(s.lists, conversation),
-    })),
+    set((s) => {
+      const existing = s.byId[conversation._id];
+      const merged = {
+        ...conversation,
+        blocked: conversation.blocked ?? existing?.blocked ?? null,
+      };
+      return {
+        byId: { ...s.byId, [conversation._id]: merged },
+        lists: placeInLists(s.lists, merged),
+      };
+    }),
 
   remove: (id) =>
     set((s) => {
@@ -100,13 +108,13 @@ export const useConversationStore = create((set, get) => ({
   /** Returns the conversation, fetching it when it is not cached (deep links, reloads). */
   ensure: async (id) => {
     const cached = get().byId[id];
-    if (cached) return cached;
+    if (cached && cached.blocked !== null && cached.blocked !== undefined) return cached;
     try {
       const { conversation } = await api.get(`/conversations/${id}`, { silent: true });
       get().upsert(conversation);
       return conversation;
     } catch {
-      return null;
+      return cached ?? null;
     }
   },
 
@@ -144,6 +152,8 @@ export const useConversationStore = create((set, get) => ({
     }
   },
 
+  markUnread: (id) => get().setFlags(id, { unread: true }),
+
   clearChat: async (id) => {
     try {
       await api.delete(`/conversations/${id}`);
@@ -167,6 +177,7 @@ export const useConversationStore = create((set, get) => ({
           type: message.type,
           text: message.text,
           hasAttachments: (message.attachments?.length ?? 0) > 0,
+          deletedAt: null,
           createdAt: message.createdAt,
         },
         lastMessageAt: message.createdAt,
@@ -238,6 +249,30 @@ export const useConversationStore = create((set, get) => ({
         }
       }
       return changed ? { byId } : {};
+    }),
+
+  setBlockedByMe: (userId, value) =>
+    set((s) => {
+      const byId = {};
+      for (const [id, c] of Object.entries(s.byId)) {
+        byId[id] =
+          c.type === "direct" && c.participants.some((p) => p.userId === userId)
+            ? { ...c, blocked: { byThem: false, ...(c.blocked ?? {}), byMe: value } }
+            : c;
+      }
+      return { byId };
+    }),
+
+  setBlockedByThem: (conversationId, value) =>
+    set((s) => {
+      const c = s.byId[conversationId];
+      if (!c) return {};
+      return {
+        byId: {
+          ...s.byId,
+          [conversationId]: { ...c, blocked: { byMe: false, ...(c.blocked ?? {}), byThem: value } },
+        },
+      };
     }),
 
   /** Drops direct conversations with a user who disabled or deleted their account. */

@@ -10,6 +10,7 @@ export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const isLoggingIn = useAuthStore((s) => s.isLoggingIn);
   const disabledUsername = useAuthStore((s) => s.disabledUsername);
+  const emailEnabled = useAuthStore((s) => s.config?.emailEnabled);
   const [form, setForm] = useState({ username: "", password: "" });
   const [passwordType, passwordToggle] = usePasswordToggle();
 
@@ -68,7 +69,15 @@ export default function LoginPage() {
           onChange={(e) => setForm({ ...form, password: e.target.value })}
           right={passwordToggle}
           required
-        />
+        >
+          {emailEnabled && (
+            <div className="text-right mt-1.5">
+              <Link to="/forgot-password" className="link link-primary text-xs">
+                Forgot password?
+              </Link>
+            </div>
+          )}
+        </Field>
         <button
           type="submit"
           className="btn btn-primary w-full"

@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 
 /**
  * Right-click / long-press menu rendered at a viewport point.
- * @param {{ anchor: {clientX:number, clientY:number} | null, items: Array<{label, icon?, onSelect, danger?}>, onClose }} props
+ * @param {{ anchor: {clientX:number, clientY:number} | null, items: Array<{label, icon?, onSelect, danger?}>, onClose, header? }} props
  */
-export default function ContextMenu({ anchor, items, onClose }) {
+export default function ContextMenu({ anchor, items, onClose, header = null, width = "w-52" }) {
   const ref = useRef(null);
   const [pos, setPos] = useState(null);
 
@@ -39,29 +39,31 @@ export default function ContextMenu({ anchor, items, onClose }) {
   if (!anchor) return null;
 
   return createPortal(
-    <ul
+    <div
       ref={ref}
-      role="menu"
-      className="menu bg-base-100 rounded-box shadow-xl border border-base-300 w-52 p-1.5 fixed z-50 text-sm"
+      className={`fixed z-50 ${width} bg-base-100 rounded-box shadow-xl border border-base-300 p-1.5`}
       style={{ left: pos?.x ?? anchor.clientX, top: pos?.y ?? anchor.clientY }}
     >
-      {items.filter(Boolean).map((item) => (
-        <li key={item.label}>
-          <button
-            type="button"
-            role="menuitem"
-            className={item.danger ? "text-error" : ""}
-            onClick={() => {
-              onClose();
-              item.onSelect();
-            }}
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        </li>
-      ))}
-    </ul>,
+      {header}
+      <ul role="menu" className="menu p-0 text-sm w-full">
+        {items.filter(Boolean).map((item) => (
+          <li key={item.label}>
+            <button
+              type="button"
+              role="menuitem"
+              className={item.danger ? "text-error" : ""}
+              onClick={() => {
+                onClose();
+                item.onSelect();
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>,
     document.body
   );
 }

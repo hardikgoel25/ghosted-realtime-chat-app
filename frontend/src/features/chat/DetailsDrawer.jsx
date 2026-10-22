@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Trash2, X } from "lucide-react";
+import { Ban, ShieldCheck, Trash2, X } from "lucide-react";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { useConversationStore } from "../../stores/useConversationStore";
 import { useUIStore } from "../../stores/useUIStore";
@@ -35,10 +35,15 @@ export default function DetailsDrawer({ conversation }) {
   const setDetailsOpen = useUIStore((s) => s.setDetailsOpen);
   const setFlags = useConversationStore((s) => s.setFlags);
   const clearChat = useConversationStore((s) => s.clearChat);
+  const block = useAuthStore((s) => s.block);
+  const unblock = useAuthStore((s) => s.unblock);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   const user = otherParticipant(conversation, me._id)?.user;
-  const online = user ? onlineUsers.includes(user._id) : false;
+  const blockedByMe = Boolean(conversation.blocked?.byMe);
+  const hidePresence = blockedByMe || Boolean(conversation.blocked?.byThem);
+  const online = user && !hidePresence ? onlineUsers.includes(user._id) : false;
   const lastSeen = user
     ? presenceLastSeen[user._id] !== undefined
       ? presenceLastSeen[user._id]
@@ -71,12 +76,18 @@ export default function DetailsDrawer({ conversation }) {
       <div className="flex-1 overflow-y-auto p-5 space-y-6">
         {user && (
           <div className="flex flex-col items-center text-center gap-3">
-            <Avatar user={user} size="xl" online={online} />
+            <Avatar user={user} size="xl" online={hidePresence ? undefined : online} />
             <div>
               <div className="text-lg font-semibold">{user.fullname}</div>
               <div className="text-sm text-base-content/60">@{user.username}</div>
               <div className="text-xs text-base-content/60 mt-1">
-                {online ? "Online" : lastSeenLabel(lastSeen)}
+                {hidePresence
+                  ? blockedByMe
+                    ? "Blocked"
+                    : ""
+                  : online
+                    ? "Online"
+                    : lastSeenLabel(lastSeen)}
               </div>
             </div>
             {user.bio && <p className="text-sm text-base-content/80 max-w-xs">{user.bio}</p>}
@@ -130,6 +141,23 @@ export default function DetailsDrawer({ conversation }) {
           />
         </div>
 
+        {user && (
+          <button
+            type="button"
+            className={`btn btn-sm w-full ${blockedByMe ? "btn-outline" : "btn-outline btn-warning"}`}
+            onClick={() => (blockedByMe ? unblock(user._id) : setConfirmBlock(true))}
+          >
+            {blockedByMe ? (
+              <>
+                <ShieldCheck className="size-4" /> Unblock {user.fullname.split(" ")[0]}
+              </>
+            ) : (
+              <>
+                <Ban className="size-4" /> Block {user.fullname.split(" ")[0]}
+              </>
+            )}
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-outline btn-error btn-sm w-full"
@@ -138,6 +166,35 @@ export default function DetailsDrawer({ conversation }) {
           <Trash2 className="size-4" /> Delete chat for me
         </button>
       </div>
+
+      <Dialog
+        open={confirmBlock}
+        onClose={() => setConfirmBlock(false)}
+        title={`Block ${user?.fullname ?? "this user"}?`}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmBlock(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={async () => {
+                setConfirmBlock(false);
+                if (user) await block(user._id);
+              }}
+            >
+              Block
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-base-content/70">
+          They will not be able to message you, and neither of you will see the other&apos;s online
+          status. Your existing chat stays.
+        </p>
+      </Dialog>
 
       <Dialog
         open={confirmDelete}

@@ -6,6 +6,7 @@ import {
   Bell,
   BellOff,
   CheckCheck,
+  MailOpen,
   Pin,
   PinOff,
   Trash2,
@@ -25,6 +26,7 @@ export default function ConversationItem({ conversation }) {
   const typing = useConversationStore((s) => s.typing[conversation._id]);
   const setFlags = useConversationStore((s) => s.setFlags);
   const markRead = useConversationStore((s) => s.markRead);
+  const markUnread = useConversationStore((s) => s.markUnread);
   const clearChat = useConversationStore((s) => s.clearChat);
   const { conversationId } = useParams();
 
@@ -51,11 +53,18 @@ export default function ConversationItem({ conversation }) {
       icon: muted ? <Bell className="size-4" /> : <BellOff className="size-4" />,
       onSelect: () => setFlags(id, { muted: !muted }),
     },
-    unread > 0 && {
-      label: "Mark as read",
-      icon: <CheckCheck className="size-4" />,
-      onSelect: () => markRead(id),
-    },
+    unread > 0
+      ? {
+          label: "Mark as read",
+          icon: <CheckCheck className="size-4" />,
+          onSelect: () => markRead(id),
+        }
+      : conversation.lastMessage &&
+        !active && {
+          label: "Mark as unread",
+          icon: <MailOpen className="size-4" />,
+          onSelect: () => markUnread(id),
+        },
     {
       label: archived ? "Unarchive" : "Archive",
       icon: archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />,

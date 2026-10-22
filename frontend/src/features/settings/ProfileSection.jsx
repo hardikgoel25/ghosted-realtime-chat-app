@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AtSign, Camera, Loader2, Trash2, User } from "lucide-react";
-import { ALLOWED_IMAGE_MIME, GENDERS, LIMITS, updateProfileSchema } from "@ghosted/shared";
+import { AtSign, Camera, Loader2, Mail, MailCheck, Trash2, User } from "lucide-react";
+import {
+  ALLOWED_IMAGE_MIME,
+  GENDERS,
+  LIMITS,
+  emailSchema,
+  updateProfileSchema,
+} from "@ghosted/shared";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { prepareImage } from "../../lib/images";
 import Avatar from "../../components/ui/Avatar";
@@ -12,6 +18,88 @@ const GENDER_LABELS = {
   other: "Other",
   "prefer not to say": "Prefer not to say",
 };
+
+function EmailCard() {
+  const authUser = useAuthStore((s) => s.authUser);
+  const emailEnabled = useAuthStore((s) => s.config?.emailEnabled);
+  const updateEmail = useAuthStore((s) => s.updateEmail);
+  const removeEmail = useAuthStore((s) => s.removeEmail);
+  const resendVerification = useAuthStore((s) => s.resendVerification);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!emailEnabled) return null;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const parsed = emailSchema.safeParse(value);
+    if (!parsed.success) return setError(parsed.error.issues[0].message);
+    setError("");
+    setBusy(true);
+    const ok = await updateEmail(parsed.data);
+    setBusy(false);
+    if (ok) setValue("");
+  };
+
+  return (
+    <div className="surface p-6 space-y-4">
+      <div>
+        <h3 className="font-medium flex items-center gap-2">
+          <Mail className="size-4 opacity-60" /> Email address
+        </h3>
+        <p className="text-sm text-base-content/60">
+          Used only for password resets. We never show it to other people.
+        </p>
+      </div>
+      {authUser.email && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{authUser.email}</span>
+          {authUser.emailVerified ? (
+            <span className="badge badge-success badge-sm gap-1">
+              <MailCheck className="size-3" /> Verified
+            </span>
+          ) : (
+            <>
+              <span className="badge badge-warning badge-sm">Unverified</span>
+              <button type="button" className="btn btn-ghost btn-xs" onClick={resendVerification}>
+                Resend link
+              </button>
+            </>
+          )}
+          <button type="button" className="btn btn-ghost btn-xs text-error" onClick={removeEmail}>
+            Remove
+          </button>
+        </div>
+      )}
+      <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2" noValidate>
+        <input
+          type="email"
+          autoComplete="email"
+          placeholder={authUser.email ? "Change email address" : "you@example.com"}
+          className={`input input-sm flex-1 ${error ? "input-error" : ""}`}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            if (error) setError("");
+          }}
+          aria-label="Email address"
+          maxLength={LIMITS.EMAIL_MAX}
+        />
+        <button type="submit" className="btn btn-sm btn-primary" disabled={busy || !value.trim()}>
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : authUser.email ? (
+            "Update"
+          ) : (
+            "Add email"
+          )}
+        </button>
+      </form>
+      {error && <p className="text-error text-xs">{error}</p>}
+    </div>
+  );
+}
 
 export default function ProfileSection() {
   const authUser = useAuthStore((s) => s.authUser);
@@ -227,6 +315,8 @@ export default function ProfileSection() {
           </button>
         </div>
       </form>
+
+      <EmailCard />
     </div>
   );
 }

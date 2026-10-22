@@ -8,6 +8,9 @@ import { PublicOnly, RequireAuth } from "./guards";
 const LoginPage = lazy(() => import("../features/auth/LoginPage"));
 const SignupPage = lazy(() => import("../features/auth/SignupPage"));
 const EnableAccountPage = lazy(() => import("../features/auth/EnableAccountPage"));
+const ForgotPasswordPage = lazy(() => import("../features/auth/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("../features/auth/ResetPasswordPage"));
+const VerifyEmailPage = lazy(() => import("../features/auth/VerifyEmailPage"));
 const EmptyChat = lazy(() => import("../features/chat/EmptyChat"));
 const ChatPage = lazy(() => import("../features/chat/ChatPage"));
 const UserProfilePage = lazy(() => import("../features/profile/UserProfilePage"));
@@ -24,8 +27,12 @@ export const router = createBrowserRouter([
           { path: "/login", element: <LoginPage /> },
           { path: "/signup", element: <SignupPage /> },
           { path: "/enable-account", element: <EnableAccountPage /> },
+          { path: "/forgot-password", element: <ForgotPasswordPage /> },
+          { path: "/reset-password", element: <ResetPasswordPage /> },
         ],
       },
+      // Works whether or not the user is signed in
+      { path: "/verify-email", element: <VerifyEmailPage /> },
       {
         element: <RequireAuth />,
         children: [

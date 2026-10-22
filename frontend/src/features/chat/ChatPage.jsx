@@ -11,6 +11,7 @@ import { useUIStore } from "../../stores/useUIStore";
 import EmptyState from "../../components/ui/EmptyState";
 import Spinner from "../../components/ui/Spinner";
 import ChatHeader from "./ChatHeader";
+import ChatSearch from "./ChatSearch";
 import MessageList from "./MessageList";
 import TypingIndicator from "./TypingIndicator";
 import Composer from "./Composer";
@@ -27,6 +28,7 @@ export default function ChatPage() {
   const setActive = useUIStore((s) => s.setActiveConversation);
   const windowFocused = useUIStore((s) => s.windowFocused);
   const detailsOpen = useUIStore((s) => s.detailsOpen);
+  const searchOpen = useUIStore((s) => s.chatSearchOpen);
 
   const [missing, setMissing] = useState(false);
   const [unreadMarker, setUnreadMarker] = useState(undefined);
@@ -114,7 +116,7 @@ export default function ChatPage() {
   const onDrop = (e) => {
     e.preventDefault();
     setDragging(false);
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+    const files = [...(e.dataTransfer?.files ?? [])];
     if (files.length) composerRef.current?.addFiles(files);
   };
 
@@ -127,6 +129,7 @@ export default function ChatPage() {
     >
       <section className="flex-1 min-w-0 flex flex-col relative" aria-label="Conversation">
         <ChatHeader conversation={conversation} />
+        {searchOpen && <ChatSearch conversation={conversation} meId={me._id} />}
         <MessageList
           key={conversationId}
           conversation={conversation}
@@ -138,7 +141,7 @@ export default function ChatPage() {
         <Composer ref={composerRef} conversation={conversation} />
         {dragging && (
           <div className="absolute inset-2 z-20 rounded-2xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
-            <p className="font-medium text-primary">Drop images to send</p>
+            <p className="font-medium text-primary">Drop files to send</p>
           </div>
         )}
       </section>

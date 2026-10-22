@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronsDown } from "lucide-react";
 import { useMessageStore } from "../../stores/useMessageStore";
 import Spinner from "../../components/ui/Spinner";
 import MessageBubble from "./MessageBubble";
@@ -24,16 +24,21 @@ function MessageSkeleton() {
 
 export default function MessageList({ conversation, state, meId, unreadMarker }) {
   const loadOlder = useMessageStore((s) => s.loadOlder);
+  const loadNewer = useMessageStore((s) => s.loadNewer);
+  const loadAround = useMessageStore((s) => s.loadAround);
+  const load = useMessageStore((s) => s.load);
   const virtuoso = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
   const [newSinceScroll, setNewSinceScroll] = useState(0);
   const [lightbox, setLightbox] = useState(null);
+  const viewingHistory = Boolean(state.newerCursor);
 
   const rows = useMemo(
     () => annotateMessages(state.items, { meId, firstUnreadAfter: unreadMarker }),
     [state.items, meId, unreadMarker]
   );
   const firstItemIndex = START_INDEX - state.olderLoaded;
+  const anchorIndex = state.anchorId ? rows.findIndex((r) => r.message._id === state.anchorId) : -1;
 
   // React to appended messages: scroll for our own, count the others while scrolled up
   const lastId = rows.at(-1)?.message._id ?? null;
@@ -42,13 +47,13 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
     if (lastId === prevLastId.current) return;
     prevLastId.current = lastId;
     const last = rows.at(-1)?.message;
-    if (!last) return;
+    if (!last || viewingHistory) return;
     if (last.senderId === meId) {
       virtuoso.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" });
     } else if (!atBottom) {
       setNewSinceScroll((n) => n + 1);
     }
-  }, [lastId, rows, meId, atBottom]);
+  }, [lastId, rows, meId, atBottom, viewingHistory]);
 
   useEffect(() => {
     if (atBottom) setNewSinceScroll(0);
@@ -72,19 +77,30 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
     );
   }
 
+  const jumpToLatest = () => {
+    if (viewingHistory) load(conversation._id);
+    else virtuoso.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" });
+  };
+
   return (
     <div className="flex-1 min-h-0 relative">
       <Virtuoso
+        key={state.windowKey}
         ref={virtuoso}
         className="h-full"
         data={rows}
         firstItemIndex={firstItemIndex}
-        initialTopMostItemIndex={{ index: rows.length - 1, align: "end" }}
+        initialTopMostItemIndex={
+          anchorIndex >= 0
+            ? { index: anchorIndex, align: "center" }
+            : { index: rows.length - 1, align: "end" }
+        }
         alignToBottom
-        followOutput={(isAtBottom) => (isAtBottom ? "smooth" : false)}
+        followOutput={(isAtBottom) => (isAtBottom && !viewingHistory ? "smooth" : false)}
         atBottomStateChange={setAtBottom}
         atBottomThreshold={60}
         startReached={() => loadOlder(conversation._id)}
+        endReached={() => viewingHistory && loadNewer(conversation._id)}
         increaseViewportBy={{ top: 600, bottom: 300 }}
         computeItemKey={(_, row) => row.message._id}
         itemContent={(_, row) => (
@@ -92,13 +108,15 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
             row={row}
             conversation={conversation}
             meId={meId}
+            highlighted={row.message._id === state.anchorId}
             onOpenImage={(urls, index) => setLightbox({ urls, index })}
+            onJumpTo={(messageId) => loadAround(conversation._id, messageId)}
           />
         )}
         components={{
           Header: () => (
             <div className="h-10 flex items-center justify-center text-xs text-base-content/50">
-              {state.loadingMore ? (
+              {state.loadingMore && !viewingHistory ? (
                 <Spinner size="sm" />
               ) : state.nextCursor ? (
                 "Scroll up for earlier messages"
@@ -107,21 +125,36 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
               )}
             </div>
           ),
-          Footer: () => <div className="h-2" />,
+          Footer: () => (
+            <div
+              className={
+                viewingHistory
+                  ? "h-10 flex items-center justify-center text-xs text-base-content/50"
+                  : "h-2"
+              }
+            >
+              {viewingHistory &&
+                (state.loadingMore ? <Spinner size="sm" /> : "Scroll down for newer messages")}
+            </div>
+          ),
         }}
       />
 
-      {!atBottom && (
+      {(!atBottom || viewingHistory) && (
         <button
           type="button"
-          className="btn btn-sm btn-circle shadow-lg absolute bottom-3 right-4 bg-base-100 border border-base-300"
-          onClick={() =>
-            virtuoso.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" })
-          }
+          className={`shadow-lg absolute bottom-3 right-4 border border-base-300 bg-base-100 ${viewingHistory ? "btn btn-sm gap-1" : "btn btn-sm btn-circle"}`}
+          onClick={jumpToLatest}
           aria-label="Jump to latest messages"
         >
-          <ChevronDown className="size-4" />
-          {newSinceScroll > 0 && (
+          {viewingHistory ? (
+            <>
+              <ChevronsDown className="size-4" /> Latest
+            </>
+          ) : (
+            <ChevronDown className="size-4" />
+          )}
+          {newSinceScroll > 0 && !viewingHistory && (
             <span className="badge badge-primary badge-xs absolute -top-1.5 -right-1.5">
               {newSinceScroll}
             </span>

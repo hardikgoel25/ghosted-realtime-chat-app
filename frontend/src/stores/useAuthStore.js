@@ -21,11 +21,25 @@ export const useAuthStore = create((set, get) => ({
   onlineUsers: [],
   /** userId -> ISO date from presence updates (null when the user hides it) */
   lastSeen: {},
+  /** Server capability flags (email, media) from GET /config */
+  config: null,
+  /** Users I have blocked */
+  blocked: [],
+
+  loadConfig: async () => {
+    try {
+      const config = await api.get("/config", { silent: true });
+      set({ config });
+    } catch {
+      set({ config: { emailEnabled: false, mediaEnabled: true } });
+    }
+  },
 
   checkAuth: async () => {
     try {
       const { user } = await api.get("/auth/me", { silent: true });
       set({ authUser: user });
+      get().fetchBlocked();
     } catch {
       set({ authUser: null });
     } finally {
@@ -53,6 +67,7 @@ export const useAuthStore = create((set, get) => ({
     try {
       const { user } = await api.post("/auth/login", data, { silent: true });
       set({ authUser: user });
+      get().fetchBlocked();
       return { ok: true };
     } catch (err) {
       if (err.code === ERROR_CODES.ACCOUNT_DISABLED) set({ disabledUsername: data.username });
@@ -69,6 +84,7 @@ export const useAuthStore = create((set, get) => ({
       const { user } = await api.post("/auth/enable", data);
       set({ authUser: user, disabledUsername: null });
       toast.success("Welcome back! Your account is active again.");
+      get().fetchBlocked();
       return true;
     } catch {
       return false;
@@ -218,6 +234,96 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ---- email ----
+  updateEmail: async (email) => {
+    try {
+      const { user } = await api.patch("/users/me/email", { email });
+      set({ authUser: user });
+      toast.success(
+        get().config?.emailEnabled ? "Check your inbox for a verification link." : "Email saved."
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  removeEmail: async () => {
+    try {
+      const { user } = await api.delete("/users/me/email");
+      set({ authUser: user });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  resendVerification: async () => {
+    try {
+      await api.post("/auth/resend-verification");
+      toast.success("Verification email sent.");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  verifyEmail: async (token) => {
+    try {
+      const result = await api.post("/auth/verify-email", { token }, { silent: true });
+      set((s) => (s.authUser ? { authUser: { ...s.authUser, emailVerified: true } } : {}));
+      return { ok: true, email: result.email };
+    } catch (err) {
+      return { ok: false, message: err.message };
+    }
+  },
+  forgotPassword: async (identifier) => {
+    try {
+      await api.post("/auth/forgot-password", { identifier });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  resetPassword: async (token, password) => {
+    try {
+      await api.post("/auth/reset-password", { token, password }, { silent: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err };
+    }
+  },
+
+  // ---- blocking ----
+  fetchBlocked: async () => {
+    try {
+      const { blocked } = await api.get("/users/me/blocked", { silent: true });
+      set({ blocked });
+    } catch {
+      // keep whatever we had
+    }
+  },
+  isBlockedByMe: (userId) => get().blocked.some((u) => u._id === userId),
+  block: async (userId) => {
+    try {
+      const { blocked } = await api.post(`/users/${userId}/block`);
+      set({ blocked });
+      useConversationStore.getState().setBlockedByMe(userId, true);
+      toast.success("User blocked");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  unblock: async (userId) => {
+    try {
+      const { blocked } = await api.delete(`/users/${userId}/block`);
+      set({ blocked });
+      useConversationStore.getState().setBlockedByMe(userId, false);
+      toast.success("User unblocked");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   // ---- presence ----
   setOnlineUsers: (userIds) => set({ onlineUsers: userIds }),
   setPresence: (userId, online, lastSeenAt) =>
@@ -246,7 +352,7 @@ export const useAuthStore = create((set, get) => ({
 
   clearSession: () => {
     disconnectSocket();
-    set({ authUser: null, onlineUsers: [], lastSeen: {}, disabledUsername: null });
+    set({ authUser: null, onlineUsers: [], lastSeen: {}, disabledUsername: null, blocked: [] });
     useConversationStore.getState().reset();
     useMessageStore.getState().reset();
     useUIStore.getState().setActiveConversation(null);

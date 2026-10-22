@@ -30,6 +30,7 @@ export default function SocketBridge() {
     const onConnect = async () => {
       ui().setSocketConnected(true);
       conversations().fetchList("all");
+      messages().retryNetworkFailures();
       const activeId = ui().activeConversationId;
       if (activeId) {
         const state = messages().stateFor(activeId);
@@ -88,6 +89,10 @@ export default function SocketBridge() {
       }
     };
 
+    const onMessageUpdated = ({ message }) => messages().update(message);
+    const onMessageDeleted = (payload) => messages().applyDeleted(payload);
+    const onMessageReaction = ({ conversationId, messageId, reactions }) =>
+      messages().setReactions(conversationId, messageId, reactions);
     const onConversationUpdated = ({ conversation }) => conversations().upsert(conversation);
     const onMessageStatus = (payload) => conversations().applyStatus(payload);
     const onTyping = ({ conversationId, userId, isTyping }) =>
@@ -119,6 +124,9 @@ export default function SocketBridge() {
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
+    socket.on(SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
+    socket.on(SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);
+    socket.on(SOCKET_EVENTS.MESSAGE_REACTION, onMessageReaction);
     socket.on(SOCKET_EVENTS.CONVERSATION_UPDATED, onConversationUpdated);
     socket.on(SOCKET_EVENTS.MESSAGE_STATUS, onMessageStatus);
     socket.on(SOCKET_EVENTS.TYPING, onTyping);
@@ -132,7 +140,11 @@ export default function SocketBridge() {
     socket.on(SOCKET_EVENTS.SESSION_REVOKED, onSessionRevoked);
     if (socket.connected) onConnect();
 
+    const onOnline = () => messages().retryNetworkFailures();
+    window.addEventListener("online", onOnline);
+
     return () => {
+      window.removeEventListener("online", onOnline);
       disconnectSocket();
     };
   }, [navigate]);

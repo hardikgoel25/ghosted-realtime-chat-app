@@ -59,6 +59,7 @@ function useTitleBadge() {
 
 export default function Root() {
   const checkAuth = useAuthStore((s) => s.checkAuth);
+  const loadConfig = useAuthStore((s) => s.loadConfig);
   const isCheckingAuth = useAuthStore((s) => s.isCheckingAuth);
   const authUser = useAuthStore((s) => s.authUser);
   const resolvedTheme = useThemeStore((s) => s.resolved);
@@ -67,8 +68,9 @@ export default function Root() {
   useTitleBadge();
 
   useEffect(() => {
+    loadConfig();
     checkAuth();
-  }, [checkAuth]);
+  }, [checkAuth, loadConfig]);
 
   if (isCheckingAuth && !authUser) {
     return (
