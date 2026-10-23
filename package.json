@@ -1,6 +1,6 @@
 {
   "name": "ghosted",
-  "version": "2.1.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Ghosted — realtime chat app (monorepo: shared, backend, frontend)",
   "type": "module",

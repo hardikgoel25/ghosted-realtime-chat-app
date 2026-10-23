@@ -1,63 +1,68 @@
 import User from "../models/user.model.js";
 import { logger } from "../config/logger.js";
+import { createMemoryPresence } from "./presence/memory.js";
+import { createRedisPresence } from "./presence/redis.js";
 
+/**
+ * Who is online. Backed by an in-process map by default, or by Redis when the server was
+ * started with REDIS_URL (see `useRedis`). The memory version answers synchronously and the
+ * Redis one with promises, so callers always `await` the result.
+ */
 const LAST_SEEN_DEBOUNCE_MS = 10_000;
 
-/** userId -> Set<socketId>; a user is online while they have at least one socket */
-const online = new Map();
+let impl = createMemoryPresence();
 /** userId -> timeout handle for the debounced lastSeenAt write */
 const lastSeenTimers = new Map();
 
-/** @returns {boolean} true when this socket made the user go online */
-export function addSocket(userId, socketId) {
-  const id = String(userId);
+function clearTimer(id) {
   const timer = lastSeenTimers.get(id);
   if (timer) {
     clearTimeout(timer);
     lastSeenTimers.delete(id);
   }
-  let set = online.get(id);
-  const wasOnline = Boolean(set?.size);
-  if (!set) {
-    set = new Set();
-    online.set(id, set);
-  }
-  set.add(socketId);
-  return !wasOnline;
 }
 
-/** @returns {boolean} true when this was the user's last socket (they went offline) */
+export function useRedis(client) {
+  impl.close?.();
+  impl = createRedisPresence(client);
+}
+
+export function useMemory() {
+  impl.close?.();
+  impl = createMemoryPresence();
+}
+
+/** @returns {boolean | Promise<boolean>} true when this socket made the user go online */
+export function addSocket(userId, socketId) {
+  clearTimer(String(userId));
+  return impl.addSocket(userId, socketId);
+}
+
+/** @returns {boolean | Promise<boolean>} true when this was the user's last socket anywhere */
 export function removeSocket(userId, socketId) {
-  const id = String(userId);
-  const set = online.get(id);
-  if (!set) return false;
-  set.delete(socketId);
-  if (set.size > 0) return false;
-  online.delete(id);
-  return true;
+  return impl.removeSocket(userId, socketId);
 }
 
 export function isOnline(userId) {
-  return online.has(String(userId));
+  return impl.isOnline(userId);
 }
 
 export function onlineUserIds() {
-  return [...online.keys()];
+  return impl.onlineUserIds();
 }
 
 export function socketCount(userId) {
-  return online.get(String(userId))?.size ?? 0;
+  return impl.socketCount(userId);
 }
 
 /** Writes lastSeenAt once the user has stayed offline for a short while (avoids write storms). */
 export function scheduleLastSeen(userId, at = new Date()) {
   const id = String(userId);
-  const existing = lastSeenTimers.get(id);
-  if (existing) clearTimeout(existing);
+  clearTimer(id);
   const timer = setTimeout(async () => {
     lastSeenTimers.delete(id);
-    if (online.has(id)) return;
     try {
+      if (await impl.isOnline(id)) return;
       await User.updateOne({ _id: id }, { $set: { lastSeenAt: at } });
     } catch (err) {
       logger.warn({ err, userId: id }, "Failed to persist lastSeenAt");
@@ -68,7 +73,7 @@ export function scheduleLastSeen(userId, at = new Date()) {
 }
 
 export function reset() {
-  online.clear();
+  impl.reset();
   for (const t of lastSeenTimers.values()) clearTimeout(t);
   lastSeenTimers.clear();
 }

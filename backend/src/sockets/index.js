@@ -41,40 +41,48 @@ export function createSocketServer(httpServer) {
 
   io.use(socketAuth);
 
-  io.on("connection", (socket) => {
+  io.on("connection", async (socket) => {
     const { user, userId } = socket.data;
     socket.join(userRoom(userId));
     socket.use(packetRateLimiter(socket));
-
-    const becameOnline = presence.addSocket(userId, socket.id);
-    socket.emit(SOCKET_EVENTS.PRESENCE_SNAPSHOT, { userIds: presence.onlineUserIds() });
-    if (becameOnline) {
-      socket.broadcast.emit(SOCKET_EVENTS.PRESENCE_UPDATE, {
-        userId,
-        online: true,
-        lastSeenAt: null,
-      });
-    }
-    logger.debug(
-      { userId, socketId: socket.id, sockets: presence.socketCount(userId) },
-      "Socket connected"
-    );
-
     registerTypingHandlers(socket);
     registerConversationHandlers(socket);
 
-    socket.on("disconnect", (reason) => {
-      const wentOffline = presence.removeSocket(userId, socket.id);
-      logger.debug({ userId, socketId: socket.id, reason, wentOffline }, "Socket disconnected");
-      if (!wentOffline) return;
-      const at = new Date();
-      presence.scheduleLastSeen(userId, at);
-      io.emit(SOCKET_EVENTS.PRESENCE_UPDATE, {
-        userId,
-        online: false,
-        lastSeenAt: user.privacy?.showLastSeen === false ? null : at,
-      });
+    socket.on("disconnect", async (reason) => {
+      try {
+        const wentOffline = await presence.removeSocket(userId, socket.id);
+        logger.debug({ userId, socketId: socket.id, reason, wentOffline }, "Socket disconnected");
+        if (!wentOffline) return;
+        const at = new Date();
+        presence.scheduleLastSeen(userId, at);
+        io.emit(SOCKET_EVENTS.PRESENCE_UPDATE, {
+          userId,
+          online: false,
+          lastSeenAt: user.privacy?.showLastSeen === false ? null : at,
+        });
+      } catch (err) {
+        logger.warn({ err, userId }, "Presence update failed on disconnect");
+      }
     });
+
+    try {
+      const becameOnline = await presence.addSocket(userId, socket.id);
+      socket.emit(SOCKET_EVENTS.PRESENCE_SNAPSHOT, { userIds: await presence.onlineUserIds() });
+      if (becameOnline) {
+        socket.broadcast.emit(SOCKET_EVENTS.PRESENCE_UPDATE, {
+          userId,
+          online: true,
+          lastSeenAt: null,
+        });
+      }
+      logger.debug(
+        { userId, socketId: socket.id, sockets: await presence.socketCount(userId) },
+        "Socket connected"
+      );
+    } catch (err) {
+      logger.error({ err, userId }, "Presence registration failed");
+      socket.disconnect(true);
+    }
   });
 
   return io;

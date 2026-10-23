@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Ghosted API and realtime server",
   "type": "module",
@@ -32,7 +32,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.15.1",
     "multer": "^2.0.0",
-    "nodemailer": "^7.0.0",
+    "nodemailer": "^10.2.1",
     "otplib": "^13.5.0",
     "pino": "^9.7.0",
     "pino-http": "^10.4.0",

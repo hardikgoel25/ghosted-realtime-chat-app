@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { dbReady } from "../config/db.js";
+import { redisStatus } from "../config/redis.js";
 import { ok } from "../utils/response.js";
 
 const { version } = createRequire(import.meta.url)("../../package.json");
@@ -10,6 +11,7 @@ export function health(_req, res) {
     version,
     uptime: Math.round(process.uptime()),
     db: dbReady() ? "connected" : "disconnected",
+    redis: redisStatus(),
     timestamp: new Date().toISOString(),
   });
 }

@@ -6,6 +6,7 @@ import User from "../models/user.model.js";
 import Conversation from "../models/conversation.model.js";
 import { hashPassword } from "../services/auth.service.js";
 import { findOrCreateDirect } from "../services/conversation.service.js";
+import { createGroup } from "../services/group.service.js";
 import { sendMessage } from "../services/message.service.js";
 import { initialsAvatar } from "../utils/avatar.js";
 
@@ -58,7 +59,18 @@ export async function seed() {
       const { conversation } = await findOrCreateDirect(byUsername[from], byUsername[to]._id);
       await sendMessage(byUsername[from], conversation._id, { text });
     }
-    logger.info({ count: DEMO_MESSAGES.length }, "Created demo conversations");
+    const group = await createGroup(byUsername.alice, {
+      name: "Ghosted team",
+      description: "Release planning and demos",
+      memberIds: [byUsername.bob._id, byUsername.casey._id],
+    });
+    await sendMessage(byUsername.alice, group._id, {
+      text: "Welcome to the team group! Phase 3 is live: groups, push, link previews and 2FA.",
+    });
+    await sendMessage(byUsername.bob, group._id, {
+      text: "Nice. The realtime bits are in https://github.com/hardikgoel25/ghosted-realtime-chat-app",
+    });
+    logger.info({ count: DEMO_MESSAGES.length + 2 }, "Created demo conversations and a group");
   }
   return Object.keys(byUsername);
 }

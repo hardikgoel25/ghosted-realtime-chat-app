@@ -3,6 +3,47 @@
 All notable changes to Ghosted are documented here. The project follows the phased plan in
 `REVAMP_PROMPT.md`.
 
+## [2.3.0-phase3] — 2026-10-23 — Groups, PWA, link previews, 2FA, Redis
+
+Each feature has its own flag and ships independently (`FEATURE_GROUPS`,
+`FEATURE_LINK_PREVIEWS`, `FEATURE_TWO_FACTOR`, `VAPID_*` for push, `REDIS_URL` for Redis).
+`GET /api/v1/config` tells the client which are on.
+
+### Added
+- **Group chats.** Create a group from the "New group" tab, add people, name and describe it,
+  set a photo. Admins manage members and roles; the last admin to leave hands over to the
+  longest-standing member and the last member out deletes the group. Group events are
+  system messages ("Alice added Bob") that never count as unread. Former members keep their
+  name in history; new members see only what follows their joining. Sender names and
+  colours in bubbles, "seen by" avatars under your latest message, typing names, member
+  count in the header, a group info drawer, and the `conversation:removed` socket event.
+  Admins may delete anyone's message for everyone. Blocks do not break groups.
+- **PWA.** Installable (manifest, icons, Install card in Settings › Notifications), an
+  app shell that opens offline, cached chat images, and a "new version" prompt instead of
+  swapping code under an open session. The service worker also drives notifications.
+- **Web Push.** With a VAPID key pair configured, members who are offline (on every
+  device) get a push for new messages, respecting mutes and the "show preview" setting.
+  Subscriptions are per device, tied to the session, and removed on sign-out.
+- **Link previews.** The first link in a message gets a title/description/site card,
+  fetched server-side with SSRF protection (no private addresses, pinned connection,
+  re-validated redirects, 5 s / 1 MB limits) and cached per URL. Images are delivered
+  through Cloudinary's fetch URL, so the CSP image allowlist is unchanged.
+- **Two-factor authentication (TOTP).** Turn it on from Settings › Account with any
+  authenticator app; ten single-use recovery codes; sign-in and account re-enabling become a
+  two-step flow with a single-use challenge. Secrets are stored encrypted.
+- **Redis flag.** `REDIS_URL` switches Socket.IO to the Redis adapter and presence to a
+  shared, heartbeat-based implementation so several API instances can run at once.
+- Tests for groups (REST and realtime), link previews (guards and end-to-end against a local
+  fixture server), 2FA, push, and the Redis presence logic (against an in-memory fake);
+  Playwright scenario for creating, chatting in and leaving a group.
+
+### Changed
+- `DELETE /conversations/:id` on a group leaves it. Message search skips system messages.
+- Date helpers take the reference time from the caller, so their tests do not depend on the
+  wall clock.
+- Service worker and manifest are served with `no-cache`; hashed assets stay immutable.
+- All packages report version 2.3.0 (the health endpoint previously said 2.0.0).
+
 ## [2.2.0-phase2] — 2026-10-22 — Rich messaging and account
 
 ### Added

@@ -176,3 +176,54 @@ test("messages can be replied to, reacted to, edited and deleted", async ({
   await aliceContext.close();
   await bobContext.close();
 });
+
+test("a group can be created, chatted in and left", async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "covered on desktop; the flow is identical");
+  const aliceContext = await browser.newContext();
+  const bobContext = await browser.newContext();
+  const alice = await aliceContext.newPage();
+  const bob = await bobContext.newPage();
+  const bobName = `bob_${suffix()}`;
+  await signup(alice, "Alice Test", `alice_${suffix()}`);
+  await signup(bob, "Bob Test", bobName);
+
+  await alice.getByRole("button", { name: "New chat" }).first().click();
+  await alice.getByRole("tab", { name: "New group" }).click();
+  await alice.getByLabel("Group name").fill("Weekend plans");
+  await alice.getByLabel("Search people").fill(bobName);
+  await alice
+    .getByRole("listitem")
+    .filter({ hasText: `@${bobName}` })
+    .click();
+  await alice.getByRole("button", { name: "Create group" }).click();
+  await expect(alice).toHaveURL(/\/c\/[a-f0-9]{24}$/);
+  await expect(alice.getByText("You created the group “Weekend plans”")).toBeVisible();
+  await expect(alice.locator("main").getByText("2 members")).toBeVisible();
+
+  await alice.getByRole("textbox", { name: "Message", exact: true }).fill("who is in?");
+  await alice.getByRole("button", { name: "Send message" }).click();
+
+  const item = bob
+    .getByRole("list", { name: "Chats" })
+    .getByRole("listitem")
+    .filter({ hasText: "Weekend plans" });
+  await expect(item).toBeVisible();
+  await expect(item).toContainText("Alice: who is in?");
+  await item.click();
+  await expect(bob.getByText("Alice created the group “Weekend plans”")).toBeVisible();
+  await expect(bob.locator(".bubble").last()).toContainText("who is in?");
+  await expect(bob.locator(".bubble").last()).toContainText("Alice Test");
+
+  // Bob leaves from the group info drawer; Alice is told
+  await bob.getByRole("button", { name: "Conversation details" }).click();
+  await bob.getByRole("button", { name: "Leave group" }).click();
+  await bob.getByRole("button", { name: "Leave", exact: true }).click();
+  await expect(bob).toHaveURL(/\/$/);
+  await expect(bob.getByRole("list", { name: "Chats" })).not.toContainText("Weekend plans");
+  // Scoped to the chat pane: the sidebar preview says "Bob left" as well
+  await expect(alice.locator("main").getByText("Bob left")).toBeVisible();
+  await expect(alice.locator("main").getByText("1 member")).toBeVisible();
+
+  await aliceContext.close();
+  await bobContext.close();
+});

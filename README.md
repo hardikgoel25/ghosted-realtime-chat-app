@@ -11,21 +11,29 @@ for what each phase delivered.
 
 ## ✨ Features (current)
 
-- Realtime 1-1 conversations over authenticated Socket.IO connections
+- Realtime 1-1 and group conversations over authenticated Socket.IO connections
+- Groups with admins, member management, photos and descriptions, system notices ("Alice added Bob"), "seen by" avatars and typing names
 - Sent / delivered / seen ticks, typing indicators, multi-device presence and last-seen (with privacy toggles)
+- Link previews fetched server-side with SSRF protection (private networks are never reachable)
 - Reply with quotes, edit (15 min), delete for me / for everyone, emoji reactions, copy, message info
 - Photos (resized in the browser), documents (PDF, Office, ZIP, text) and voice messages, all verified by their bytes server-side
 - Conversation list with search, All / Unread / Archived tabs, pin, mute (timed or forever), archive, mark as unread and delete-for-me
 - Search inside a conversation with jump-to-context; virtualised history that pages in both directions
 - Optimistic sending with automatic retry, offline awareness, drafts per chat, "new messages" divider, lightbox
 - Blocking (no messages, search hits or presence between blocked users)
-- Notifications: toasts, sounds, optional desktop notifications, tab badge; muted chats stay quiet
+- Notifications: toasts, sounds, optional desktop notifications, tab badge, and Web Push to offline devices; muted chats stay quiet
+- Installable PWA: app shell that opens offline, cached media, update prompt
 - Command palette (Ctrl/⌘ K) for chats, settings and themes
 - Username/password auth with short-lived access tokens + rotating refresh sessions, device management, password change
+- Optional TOTP two-factor authentication with single-use recovery codes
 - Optional email verification and password reset (when SMTP is configured)
 - Profile, appearance (8 themes + system), notification, privacy and account settings; public profile pages
 - Account disable / re-enable / permanent delete (with media cleanup)
 - Brute-force protection, account lockout, rate limits, CSRF origin checks, security headers
+- Runs on one instance by default; set `REDIS_URL` to scale out (Socket.IO Redis adapter + shared presence)
+
+Phase 3 features are individually switchable (`FEATURE_GROUPS`, `FEATURE_LINK_PREVIEWS`,
+`FEATURE_TWO_FACTOR`, `VAPID_*`, `REDIS_URL`); `GET /api/v1/config` reports what is on.
 
 ## 🛠️ Tech stack
 
@@ -42,10 +50,11 @@ for what each phase delivered.
 ```
 .
 ├── backend/          Express API + Socket.IO server
-│   ├── src/config/      env (Zod-validated), db, logger, cloudinary
-│   ├── src/models/      User, Session, Conversation, Message
+│   ├── src/config/      env (Zod-validated), features (flags), db, redis, logger, cloudinary
+│   ├── src/models/      User, Session, Conversation, Message, Block, EmailToken, PushSubscription, LinkPreview
 │   ├── src/middleware/  auth, validate, rateLimit, origin (CSRF), upload, error
-│   ├── src/services/    auth, token, user, conversation, message, media, presence
+│   ├── src/services/    auth, twoFactor, token, user, conversation, group, message, media,
+│   │                    linkPreview, push, notification, presence (memory | redis)
 │   ├── src/controllers/ thin HTTP handlers
 │   ├── src/routes/v1/   /api/v1/*
 │   ├── src/sockets/     handshake auth, presence, typing, emit helpers
@@ -125,6 +134,15 @@ the script). Prefix it with the local database when using `dev:local`:
 | `SMTP_URL`               | no       | —                       | nodemailer URL (e.g. `smtps://user:pass@host:465`); enables email verification + password reset |
 | `EMAIL_FROM`             | no       | `Ghosted <no-reply@ghosted.app>` | Sender address for those emails                 |
 | `APP_URL`                | no       | first `CLIENT_ORIGINS` entry | Public web URL used in email links                   |
+| `FEATURE_GROUPS`         | no       | `true`                  | Group chats                                            |
+| `FEATURE_LINK_PREVIEWS`  | no       | `true`                  | Server-side link previews                              |
+| `FEATURE_TWO_FACTOR`     | no       | `true`                  | TOTP two-factor authentication                         |
+| `TOTP_ISSUER`            | no       | `Ghosted`               | Name shown in authenticator apps                       |
+| `VAPID_PUBLIC_KEY`       | no       | —                       | Both VAPID keys enable Web Push (`npx web-push generate-vapid-keys`) |
+| `VAPID_PRIVATE_KEY`      | no       | —                       |                                                        |
+| `VAPID_SUBJECT`          | no       | `mailto:` from `EMAIL_FROM` | Contact for push services                           |
+| `REDIS_URL`              | no       | —                       | Enables the Socket.IO Redis adapter and shared presence for several instances |
+| `LINK_PREVIEW_ALLOW_PRIVATE` | no   | `false`                 | Dev/test only (ignored in production): allow previews of private addresses |
 
 The frontend needs no env in development. Set `VITE_API_URL` only if the API lives on another
 host (see `frontend/.env.example`).
@@ -140,18 +158,26 @@ The backend suite covers auth (signup validation, uniform errors, lockout, refre
 detection, logout, sessions, password change, disable/enable/delete), validation and the error
 envelope, authorization, CSRF origin checks, security headers, rate limiting, uploads (magic-byte
 checks, size limits, mock Cloudinary), the Socket.IO handshake (cookie auth, forged ids ignored,
-multi-device presence, message delivery, typing) and the data migration. Tests download a MongoDB
-binary on first run; set `MONGODB_TEST_URI` to use an existing server instead.
+multi-device presence, message delivery, typing), the data migration, groups (REST and realtime),
+two-factor authentication, Web Push (mocked transport), link previews (SSRF guards and an
+end-to-end fetch against a local fixture server) and the Redis presence logic (against an
+in-memory fake; a real Redis is not part of the test run). Tests download a MongoDB binary on
+first run; set `MONGODB_TEST_URI` to use an existing server instead.
 
 ## ☁️ Deployment (Render)
 
 - **Build command:** `npm run build`
 - **Start command:** `npm start`
 - **Environment:** `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, Cloudinary keys,
-  `TRUST_PROXY=1`, and `CLIENT_ORIGINS=https://<your-app>.onrender.com`.
+  `TRUST_PROXY=1`, and `CLIENT_ORIGINS=https://<your-app>.onrender.com`. Add
+  `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` for push notifications and `SMTP_URL` for email.
+- **Health check path:** `/api/v1/health`
 
 In production the API serves the built frontend from `frontend/dist`, so cookies are first-party
 and no CORS configuration is needed. Migrations run automatically on start and are idempotent.
+The PWA needs HTTPS (Render provides it); the service worker and manifest are served with
+`no-cache` while hashed assets are cached for a year. One instance is enough; to run several,
+point them all at the same Redis with `REDIS_URL`.
 
 ## 📚 More docs
 
