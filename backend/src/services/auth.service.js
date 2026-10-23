@@ -17,6 +17,7 @@ import { initialsAvatar } from "../utils/avatar.js";
 import * as tokens from "./token.service.js";
 import * as media from "./media.service.js";
 import * as mail from "./mail.service.js";
+import { leaveAllGroups } from "./group.service.js";
 import { broadcast, disconnectUserSockets } from "../sockets/emit.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -198,7 +199,8 @@ export async function deleteAccount(user, { password }) {
   const doc = await assertPassword(user, password);
   const userId = doc._id;
 
-  // Direct conversations die with the account; group memberships are left for Phase 3
+  // Direct conversations die with the account; groups get a "left" notice first
+  await leaveAllGroups(userId);
   const conversationIds = await Conversation.distinct("_id", {
     type: "direct",
     "participants.userId": userId,
@@ -213,8 +215,14 @@ export async function deleteAccount(user, { password }) {
 
   await withTransaction(async (session) => {
     const opts = sessionOptions(session);
+    // Group "left" notices are system messages authored by this user; they must survive
     await Message.deleteMany(
-      { $or: [{ conversationId: { $in: conversationIds } }, { senderId: userId }] },
+      {
+        $or: [
+          { conversationId: { $in: conversationIds } },
+          { senderId: userId, type: { $ne: "system" } },
+        ],
+      },
       opts
     );
     await Conversation.deleteMany({ _id: { $in: conversationIds } }, opts);

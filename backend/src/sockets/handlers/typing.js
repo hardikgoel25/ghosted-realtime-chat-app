@@ -1,22 +1,36 @@
 import { SOCKET_EVENTS, conversationTypingSchema } from "@ghosted/shared";
 import { participantIdsOf } from "../../services/conversation.service.js";
-import { isBlockedEither } from "../../services/block.service.js";
+import { blockSets } from "../../services/block.service.js";
 import { emitToUser } from "../emit.js";
 
 const TYPING_THROTTLE_MS = 2000;
+// Membership and block lists are cached per socket for a short while so typing never costs a
+// query per keystroke; group membership changes take effect within this window.
+const CACHE_TTL_MS = 30_000;
 
-/** Participants of conversations this socket has touched, so typing does not hit the DB. */
-export function conversationCache(socket) {
+function cacheOf(socket) {
   socket.data.participantsByConversation ??= new Map();
   return socket.data.participantsByConversation;
 }
 
+export function rememberParticipants(socket, conversationId, ids) {
+  cacheOf(socket).set(conversationId, { ids, at: Date.now() });
+}
+
 async function participantsFor(socket, conversationId) {
-  const cache = conversationCache(socket);
-  if (cache.has(conversationId)) return cache.get(conversationId);
+  const entry = cacheOf(socket).get(conversationId);
+  if (entry && Date.now() - entry.at < CACHE_TTL_MS) return entry.ids;
   const ids = await participantIdsOf(conversationId, socket.data.userId);
-  if (ids) cache.set(conversationId, ids);
+  if (ids) rememberParticipants(socket, conversationId, ids);
   return ids;
+}
+
+async function blocksFor(socket) {
+  const cached = socket.data.blocks;
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.sets;
+  const sets = await blockSets(socket.data.userId);
+  socket.data.blocks = { sets, at: Date.now() };
+  return sets;
 }
 
 export function registerTypingHandlers(socket) {
@@ -24,10 +38,11 @@ export function registerTypingHandlers(socket) {
   const { userId } = socket.data;
 
   const relay = async (conversationId, participants, isTyping) => {
+    const blocks = await blocksFor(socket);
     for (const id of participants) {
       if (id === userId) continue;
       // Blocked pairs get no presence signals in either direction
-      if (await isBlockedEither(userId, id)) continue;
+      if (blocks.byMe.has(id) || blocks.byThem.has(id)) continue;
       emitToUser(id, SOCKET_EVENTS.TYPING, { conversationId, userId, isTyping });
     }
   };

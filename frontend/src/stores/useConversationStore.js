@@ -43,247 +43,297 @@ function placeInLists(lists, conversation) {
   };
 }
 
-export const useConversationStore = create((set, get) => ({
-  ...initialState(),
-  drafts: loadDrafts(),
-
-  reset: () => {
-    for (const t of typingTimers.values()) clearTimeout(t);
-    typingTimers.clear();
-    set({ ...initialState() });
-  },
-
-  fetchList: async (filter = "all", { more = false } = {}) => {
-    const key = filter === "archived" ? "archived" : "all";
-    const current = get().lists[key];
-    if (get().loading[key]) return;
-    if (more && !current.nextCursor) return;
-    set((s) => ({ loading: { ...s.loading, [key]: true } }));
+export const useConversationStore = create((set, get) => {
+  /** Runs a group mutation and stores the returned conversation; false on failure. */
+  const mutate = async (request) => {
     try {
-      const params = { filter: key, limit: PAGE_SIZE };
-      if (more) params.cursor = current.nextCursor;
-      const { items, nextCursor } = await api.get("/conversations", { params, silent: true });
+      const { conversation } = await request();
+      if (conversation) get().upsert(conversation);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    ...initialState(),
+    drafts: loadDrafts(),
+
+    reset: () => {
+      for (const t of typingTimers.values()) clearTimeout(t);
+      typingTimers.clear();
+      set({ ...initialState() });
+    },
+
+    fetchList: async (filter = "all", { more = false } = {}) => {
+      const key = filter === "archived" ? "archived" : "all";
+      const current = get().lists[key];
+      if (get().loading[key]) return;
+      if (more && !current.nextCursor) return;
+      set((s) => ({ loading: { ...s.loading, [key]: true } }));
+      try {
+        const params = { filter: key, limit: PAGE_SIZE };
+        if (more) params.cursor = current.nextCursor;
+        const { items, nextCursor } = await api.get("/conversations", { params, silent: true });
+        set((s) => {
+          const byId = { ...s.byId };
+          for (const c of items) byId[c._id] = c;
+          const ids = more
+            ? uniq([...s.lists[key].ids, ...items.map((c) => c._id)])
+            : items.map((c) => c._id);
+          return { byId, lists: { ...s.lists, [key]: { ids, nextCursor, loaded: true } } };
+        });
+      } catch {
+        // Surfaced on next interaction; the socket keeps the list fresh once connected
+      } finally {
+        set((s) => ({ loading: { ...s.loading, [key]: false } }));
+      }
+    },
+
+    /** Socket updates carry no block state, so the last known value is kept. */
+    upsert: (conversation) =>
+      set((s) => {
+        const existing = s.byId[conversation._id];
+        const merged = {
+          ...conversation,
+          blocked: conversation.blocked ?? existing?.blocked ?? null,
+        };
+        return {
+          byId: { ...s.byId, [conversation._id]: merged },
+          lists: placeInLists(s.lists, merged),
+        };
+      }),
+
+    remove: (id) =>
       set((s) => {
         const byId = { ...s.byId };
-        for (const c of items) byId[c._id] = c;
-        const ids = more
-          ? uniq([...s.lists[key].ids, ...items.map((c) => c._id)])
-          : items.map((c) => c._id);
-        return { byId, lists: { ...s.lists, [key]: { ids, nextCursor, loaded: true } } };
-      });
-    } catch {
-      // Surfaced on next interaction; the socket keeps the list fresh once connected
-    } finally {
-      set((s) => ({ loading: { ...s.loading, [key]: false } }));
-    }
-  },
+        delete byId[id];
+        return {
+          byId,
+          lists: {
+            all: { ...s.lists.all, ids: s.lists.all.ids.filter((x) => x !== id) },
+            archived: { ...s.lists.archived, ids: s.lists.archived.ids.filter((x) => x !== id) },
+          },
+        };
+      }),
 
-  /** Socket updates carry no block state, so the last known value is kept. */
-  upsert: (conversation) =>
-    set((s) => {
-      const existing = s.byId[conversation._id];
-      const merged = {
-        ...conversation,
-        blocked: conversation.blocked ?? existing?.blocked ?? null,
-      };
-      return {
-        byId: { ...s.byId, [conversation._id]: merged },
-        lists: placeInLists(s.lists, merged),
-      };
-    }),
+    /** Returns the conversation, fetching it when it is not cached (deep links, reloads). */
+    ensure: async (id) => {
+      const cached = get().byId[id];
+      if (cached && cached.blocked !== null && cached.blocked !== undefined) return cached;
+      try {
+        const { conversation } = await api.get(`/conversations/${id}`, { silent: true });
+        get().upsert(conversation);
+        return conversation;
+      } catch {
+        return cached ?? null;
+      }
+    },
 
-  remove: (id) =>
-    set((s) => {
-      const byId = { ...s.byId };
-      delete byId[id];
-      return {
-        byId,
-        lists: {
-          all: { ...s.lists.all, ids: s.lists.all.ids.filter((x) => x !== id) },
-          archived: { ...s.lists.archived, ids: s.lists.archived.ids.filter((x) => x !== id) },
-        },
-      };
-    }),
-
-  /** Returns the conversation, fetching it when it is not cached (deep links, reloads). */
-  ensure: async (id) => {
-    const cached = get().byId[id];
-    if (cached && cached.blocked !== null && cached.blocked !== undefined) return cached;
-    try {
-      const { conversation } = await api.get(`/conversations/${id}`, { silent: true });
+    openDirect: async (userId) => {
+      const { conversation } = await api.post("/conversations/direct", { userId });
       get().upsert(conversation);
       return conversation;
-    } catch {
-      return cached ?? null;
-    }
-  },
+    },
 
-  openDirect: async (userId) => {
-    const { conversation } = await api.post("/conversations/direct", { userId });
-    get().upsert(conversation);
-    return conversation;
-  },
+    // ---- groups ----
 
-  markRead: async (id) => {
-    const c = get().byId[id];
-    if (!c) return;
-    const alreadyRead =
-      c.me.unread === 0 &&
-      (!c.lastMessage ||
-        (c.me.lastReadAt && new Date(c.me.lastReadAt) >= new Date(c.lastMessage.createdAt)));
-    if (alreadyRead) return;
-    const optimistic = { ...c, me: { ...c.me, unread: 0, lastReadAt: new Date().toISOString() } };
-    set((s) => ({ byId: { ...s.byId, [id]: optimistic } }));
-    try {
-      const { conversation } = await api.post(`/conversations/${id}/read`, null, { silent: true });
+    createGroup: async ({ name, description, memberIds }) => {
+      const { conversation } = await api.post("/conversations/group", {
+        name,
+        memberIds,
+        ...(description ? { description } : {}),
+      });
       get().upsert(conversation);
-    } catch {
-      // The next incoming update will reconcile
-    }
-  },
+      return conversation;
+    },
+    updateGroup: (id, data) => mutate(() => api.patch(`/conversations/${id}/group`, data)),
+    uploadGroupAvatar: (id, file) =>
+      mutate(() => {
+        const form = new FormData();
+        form.append("avatar", file);
+        return api.put(`/conversations/${id}/group/avatar`, form);
+      }),
+    removeGroupAvatar: (id) => mutate(() => api.delete(`/conversations/${id}/group/avatar`)),
+    addMembers: (id, userIds) =>
+      mutate(() => api.post(`/conversations/${id}/members`, { userIds })),
+    removeMember: (id, userId) =>
+      mutate(() => api.delete(`/conversations/${id}/members/${userId}`)),
+    setMemberRole: (id, userId, role) =>
+      mutate(() => api.patch(`/conversations/${id}/members/${userId}`, { role })),
 
-  setFlags: async (id, flags) => {
-    try {
-      const { conversation } = await api.patch(`/conversations/${id}`, flags);
-      get().upsert(conversation);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  markUnread: (id) => get().setFlags(id, { unread: true }),
-
-  clearChat: async (id) => {
-    try {
-      await api.delete(`/conversations/${id}`);
-      get().remove(id);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  /** Optimistic preview update when the user sends, before the server echoes it back. */
-  bumpLastMessage: (id, message) =>
-    set((s) => {
-      const c = s.byId[id];
-      if (!c) return {};
-      const updated = {
+    markRead: async (id) => {
+      const c = get().byId[id];
+      if (!c) return;
+      const alreadyRead =
+        c.me.unread === 0 &&
+        (!c.lastMessage ||
+          (c.me.lastReadAt && new Date(c.me.lastReadAt) >= new Date(c.lastMessage.createdAt)));
+      if (alreadyRead) return;
+      const optimistic = {
         ...c,
-        lastMessage: {
-          _id: message._id,
-          senderId: message.senderId,
-          type: message.type,
-          text: message.text,
-          hasAttachments: (message.attachments?.length ?? 0) > 0,
-          deletedAt: null,
-          createdAt: message.createdAt,
-        },
-        lastMessageAt: message.createdAt,
-        me: { ...c.me, archived: false },
+        me: { ...c.me, unread: 0, lastReadAt: new Date().toISOString() },
       };
-      return { byId: { ...s.byId, [id]: updated }, lists: placeInLists(s.lists, updated) };
-    }),
+      set((s) => ({ byId: { ...s.byId, [id]: optimistic } }));
+      try {
+        const { conversation } = await api.post(`/conversations/${id}/read`, null, {
+          silent: true,
+        });
+        get().upsert(conversation);
+      } catch {
+        // The next incoming update will reconcile
+      }
+    },
 
-  applyStatus: ({ conversationId, userId, status, at }) =>
-    set((s) => {
-      const c = s.byId[conversationId];
-      if (!c) return {};
-      const participants = c.participants.map((p) =>
-        p.userId !== userId
-          ? p
-          : {
-              ...p,
-              lastDeliveredAt: maxDate(p.lastDeliveredAt, at),
-              lastReadAt: status === "seen" ? maxDate(p.lastReadAt, at) : p.lastReadAt,
-            }
-      );
-      return { byId: { ...s.byId, [conversationId]: { ...c, participants } } };
-    }),
+    setFlags: async (id, flags) => {
+      try {
+        const { conversation } = await api.patch(`/conversations/${id}`, flags);
+        get().upsert(conversation);
+        return true;
+      } catch {
+        return false;
+      }
+    },
 
-  setTyping: (conversationId, userId, isTyping) => {
-    const key = `${conversationId}:${userId}`;
-    const existing = typingTimers.get(key);
-    if (existing) clearTimeout(existing);
-    if (isTyping) {
-      typingTimers.set(
-        key,
-        setTimeout(() => get().setTyping(conversationId, userId, false), TYPING_CLEAR_MS)
-      );
-    } else {
-      typingTimers.delete(key);
-    }
-    set((s) => {
-      const current = { ...(s.typing[conversationId] ?? {}) };
-      if (isTyping) current[userId] = true;
-      else delete current[userId];
-      return { typing: { ...s.typing, [conversationId]: current } };
-    });
-  },
+    markUnread: (id) => get().setFlags(id, { unread: true }),
 
-  setDraft: (id, text) =>
-    set((s) => {
-      const drafts = { ...s.drafts };
-      if (text && text.trim()) drafts[id] = text;
-      else delete drafts[id];
-      saveDrafts(drafts);
-      return { drafts };
-    }),
+    /** Direct chat: delete for me. Group: leave. Either way it disappears from the list. */
+    clearChat: async (id) => {
+      try {
+        await api.delete(`/conversations/${id}`);
+        get().remove(id);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    leaveGroup: (id) => get().clearChat(id),
 
-  updateUser: (user) =>
-    set((s) => {
-      let changed = false;
-      const byId = {};
-      for (const [id, c] of Object.entries(s.byId)) {
-        if (c.participants.some((p) => p.userId === user._id)) {
-          changed = true;
-          byId[id] = {
-            ...c,
-            participants: c.participants.map((p) =>
-              p.userId === user._id ? { ...p, user: { ...p.user, ...user } } : p
-            ),
-          };
-        } else {
-          byId[id] = c;
+    /** Optimistic preview update when the user sends, before the server echoes it back. */
+    bumpLastMessage: (id, message) =>
+      set((s) => {
+        const c = s.byId[id];
+        if (!c) return {};
+        const updated = {
+          ...c,
+          lastMessage: {
+            _id: message._id,
+            senderId: message.senderId,
+            type: message.type,
+            text: message.text,
+            hasAttachments: (message.attachments?.length ?? 0) > 0,
+            system: null,
+            deletedAt: null,
+            createdAt: message.createdAt,
+          },
+          lastMessageAt: message.createdAt,
+          me: { ...c.me, archived: false },
+        };
+        return { byId: { ...s.byId, [id]: updated }, lists: placeInLists(s.lists, updated) };
+      }),
+
+    applyStatus: ({ conversationId, userId, status, at }) =>
+      set((s) => {
+        const c = s.byId[conversationId];
+        if (!c) return {};
+        const participants = c.participants.map((p) =>
+          p.userId !== userId
+            ? p
+            : {
+                ...p,
+                lastDeliveredAt: maxDate(p.lastDeliveredAt, at),
+                lastReadAt: status === "seen" ? maxDate(p.lastReadAt, at) : p.lastReadAt,
+              }
+        );
+        return { byId: { ...s.byId, [conversationId]: { ...c, participants } } };
+      }),
+
+    setTyping: (conversationId, userId, isTyping) => {
+      const key = `${conversationId}:${userId}`;
+      const existing = typingTimers.get(key);
+      if (existing) clearTimeout(existing);
+      if (isTyping) {
+        typingTimers.set(
+          key,
+          setTimeout(() => get().setTyping(conversationId, userId, false), TYPING_CLEAR_MS)
+        );
+      } else {
+        typingTimers.delete(key);
+      }
+      set((s) => {
+        const current = { ...(s.typing[conversationId] ?? {}) };
+        if (isTyping) current[userId] = true;
+        else delete current[userId];
+        return { typing: { ...s.typing, [conversationId]: current } };
+      });
+    },
+
+    setDraft: (id, text) =>
+      set((s) => {
+        const drafts = { ...s.drafts };
+        if (text && text.trim()) drafts[id] = text;
+        else delete drafts[id];
+        saveDrafts(drafts);
+        return { drafts };
+      }),
+
+    updateUser: (user) =>
+      set((s) => {
+        let changed = false;
+        const byId = {};
+        for (const [id, c] of Object.entries(s.byId)) {
+          if (c.participants.some((p) => p.userId === user._id)) {
+            changed = true;
+            byId[id] = {
+              ...c,
+              participants: c.participants.map((p) =>
+                p.userId === user._id ? { ...p, user: { ...p.user, ...user } } : p
+              ),
+            };
+          } else {
+            byId[id] = c;
+          }
         }
-      }
-      return changed ? { byId } : {};
-    }),
+        return changed ? { byId } : {};
+      }),
 
-  setBlockedByMe: (userId, value) =>
-    set((s) => {
-      const byId = {};
-      for (const [id, c] of Object.entries(s.byId)) {
-        byId[id] =
-          c.type === "direct" && c.participants.some((p) => p.userId === userId)
-            ? { ...c, blocked: { byThem: false, ...(c.blocked ?? {}), byMe: value } }
-            : c;
-      }
-      return { byId };
-    }),
+    setBlockedByMe: (userId, value) =>
+      set((s) => {
+        const byId = {};
+        for (const [id, c] of Object.entries(s.byId)) {
+          byId[id] =
+            c.type === "direct" && c.participants.some((p) => p.userId === userId)
+              ? { ...c, blocked: { byThem: false, ...(c.blocked ?? {}), byMe: value } }
+              : c;
+        }
+        return { byId };
+      }),
 
-  setBlockedByThem: (conversationId, value) =>
-    set((s) => {
-      const c = s.byId[conversationId];
-      if (!c) return {};
-      return {
-        byId: {
-          ...s.byId,
-          [conversationId]: { ...c, blocked: { byMe: false, ...(c.blocked ?? {}), byThem: value } },
-        },
-      };
-    }),
+    setBlockedByThem: (conversationId, value) =>
+      set((s) => {
+        const c = s.byId[conversationId];
+        if (!c) return {};
+        return {
+          byId: {
+            ...s.byId,
+            [conversationId]: {
+              ...c,
+              blocked: { byMe: false, ...(c.blocked ?? {}), byThem: value },
+            },
+          },
+        };
+      }),
 
-  /** Drops direct conversations with a user who disabled or deleted their account. */
-  removeUser: (userId) => {
-    const removed = Object.values(get().byId)
-      .filter((c) => c.type === "direct" && c.participants.some((p) => p.userId === userId))
-      .map((c) => c._id);
-    for (const id of removed) get().remove(id);
-    return removed;
-  },
+    /** Drops direct conversations with a user who disabled or deleted their account. */
+    removeUser: (userId) => {
+      const removed = Object.values(get().byId)
+        .filter((c) => c.type === "direct" && c.participants.some((p) => p.userId === userId))
+        .map((c) => c._id);
+      for (const id of removed) get().remove(id);
+      return removed;
+    },
 
-  totalUnread: () =>
-    get().lists.all.ids.reduce((sum, id) => sum + (get().byId[id]?.me?.unread ?? 0), 0),
-}));
+    totalUnread: () =>
+      get().lists.all.ids.reduce((sum, id) => sum + (get().byId[id]?.me?.unread ?? 0), 0),
+  };
+});

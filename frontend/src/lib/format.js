@@ -4,11 +4,13 @@ import {
   formatDistanceToNowStrict,
   isSameDay,
   isSameYear,
-  isToday,
-  isYesterday,
+  subDays,
 } from "date-fns";
 
 const asDate = (value) => (value instanceof Date ? value : new Date(value));
+// Relative to the supplied "now" (not the wall clock) so the helpers are deterministic
+const isToday = (date, now) => isSameDay(date, now);
+const isYesterday = (date, now) => isSameDay(date, subDays(now, 1));
 
 export function timeOf(value) {
   return format(asDate(value), "HH:mm");
@@ -17,16 +19,16 @@ export function timeOf(value) {
 /** "Today", "Yesterday", "Tuesday, 3 June" or "3 June 2025" */
 export function dayLabel(value, now = new Date()) {
   const date = asDate(value);
-  if (isToday(date)) return "Today";
-  if (isYesterday(date)) return "Yesterday";
+  if (isToday(date, now)) return "Today";
+  if (isYesterday(date, now)) return "Yesterday";
   return format(date, isSameYear(date, now) ? "EEEE, d MMMM" : "d MMMM yyyy");
 }
 
 /** Compact timestamp for list rows: time today, "Yesterday", weekday within a week, else date */
 export function listTime(value, now = new Date()) {
   const date = asDate(value);
-  if (isToday(date)) return format(date, "HH:mm");
-  if (isYesterday(date)) return "Yesterday";
+  if (isToday(date, now)) return format(date, "HH:mm");
+  if (isYesterday(date, now)) return "Yesterday";
   const days = (now.getTime() - date.getTime()) / 86_400_000;
   if (days < 7) return format(date, "EEE");
   return format(date, isSameYear(date, now) ? "d MMM" : "dd/MM/yy");
@@ -38,8 +40,8 @@ export function lastSeenLabel(value, now = new Date()) {
   const minutes = differenceInMinutes(now, date);
   if (minutes < 1) return "Last seen just now";
   if (minutes < 60) return `Last seen ${minutes} min ago`;
-  if (isToday(date)) return `Last seen today at ${format(date, "HH:mm")}`;
-  if (isYesterday(date)) return `Last seen yesterday at ${format(date, "HH:mm")}`;
+  if (isToday(date, now)) return `Last seen today at ${format(date, "HH:mm")}`;
+  if (isYesterday(date, now)) return `Last seen yesterday at ${format(date, "HH:mm")}`;
   return `Last seen ${format(date, isSameYear(date, now) ? "d MMM" : "d MMM yyyy")}`;
 }
 

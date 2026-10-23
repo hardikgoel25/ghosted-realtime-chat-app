@@ -1,5 +1,7 @@
 import * as conversationService from "../services/conversation.service.js";
+import * as groupService from "../services/group.service.js";
 import * as messageService from "../services/message.service.js";
+import { ApiError } from "../utils/ApiError.js";
 import { ok } from "../utils/response.js";
 
 export async function list(req, res) {
@@ -44,13 +46,78 @@ export async function markRead(req, res) {
   ok(res, { conversation });
 }
 
+/** Direct chats: delete for me. Groups: leave. */
 export async function clear(req, res) {
-  const conversation = await conversationService.clearForMe(
+  const { conversationId } = req.validated.params;
+  const conversation = await conversationService.loadForMember(req.user._id, conversationId);
+  if (conversation.type === "group") {
+    await groupService.leaveGroup(req.user, conversationId);
+    return ok(res, { left: true, conversation: null });
+  }
+  ok(res, { conversation: await conversationService.clearForMe(req.user, conversationId) });
+}
+
+// ---- groups ----
+
+export async function createGroup(req, res) {
+  const conversation = await groupService.createGroup(req.user, req.validated.body);
+  ok(res, { conversation }, 201);
+}
+
+export async function updateGroup(req, res) {
+  const conversation = await groupService.updateGroup(
+    req.user,
+    req.validated.params.conversationId,
+    req.validated.body
+  );
+  ok(res, { conversation });
+}
+
+export async function updateGroupAvatar(req, res) {
+  if (!req.file) throw ApiError.badRequest("No image file was uploaded (field name: avatar)");
+  const conversation = await groupService.updateGroupAvatar(
+    req.user,
+    req.validated.params.conversationId,
+    req.file
+  );
+  ok(res, { conversation });
+}
+
+export async function removeGroupAvatar(req, res) {
+  const conversation = await groupService.removeGroupAvatar(
     req.user,
     req.validated.params.conversationId
   );
   ok(res, { conversation });
 }
+
+export async function addMembers(req, res) {
+  const conversation = await groupService.addMembers(
+    req.user,
+    req.validated.params.conversationId,
+    req.validated.body.userIds
+  );
+  ok(res, { conversation });
+}
+
+export async function removeMember(req, res) {
+  const { conversationId, userId } = req.validated.params;
+  const conversation = await groupService.removeMember(req.user, conversationId, userId);
+  ok(res, { conversation });
+}
+
+export async function setMemberRole(req, res) {
+  const { conversationId, userId } = req.validated.params;
+  const conversation = await groupService.setMemberRole(
+    req.user,
+    conversationId,
+    userId,
+    req.validated.body.role
+  );
+  ok(res, { conversation });
+}
+
+// ---- messages ----
 
 export async function listMessages(req, res) {
   const page = await messageService.listMessages(

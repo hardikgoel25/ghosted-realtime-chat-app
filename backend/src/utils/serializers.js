@@ -1,6 +1,6 @@
 /**
  * Every payload that leaves the API goes through one of these whitelists.
- * Nothing here ever copies a password hash, lockout counters or token material.
+ * Nothing here ever copies a password hash, lockout counters, TOTP secrets or token material.
  */
 
 function plain(doc) {
@@ -49,6 +49,7 @@ export function serializeUser(user, { self = false } = {}) {
       desktop: Boolean(u.notificationPrefs?.desktop),
       preview: u.notificationPrefs?.preview !== false,
     };
+    base.twoFactorEnabled = Boolean(u.twoFactor?.enabled);
     base.updatedAt = u.updatedAt;
   }
   return base;
@@ -64,6 +65,26 @@ function serializeAttachment(a) {
     height: a.height ?? null,
     durationMs: a.durationMs ?? null,
     name: a.name ?? null,
+  };
+}
+
+function serializeSystem(system) {
+  if (!system) return null;
+  return {
+    kind: system.kind,
+    targetIds: (system.targetIds ?? []).map(String),
+    text: system.text ?? "",
+  };
+}
+
+function serializeLinkPreview(preview) {
+  if (!preview?.url) return null;
+  return {
+    url: preview.url,
+    title: preview.title ?? null,
+    description: preview.description ?? null,
+    siteName: preview.siteName ?? null,
+    image: preview.image ?? null,
   };
 }
 
@@ -94,6 +115,8 @@ export function serializeMessage(message) {
       : (m.reactions ?? [])
           .filter((r) => r.userIds?.length)
           .map((r) => ({ emoji: r.emoji, userIds: r.userIds.map(String) })),
+    system: m.type === "system" ? serializeSystem(m.system) : null,
+    linkPreview: deleted ? null : serializeLinkPreview(m.linkPreview),
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     createdAt: m.createdAt,
@@ -105,7 +128,8 @@ export function serializeMessage(message) {
  * A conversation as seen by one participant. Read cursors of other participants are only
  * exposed when both sides have read receipts enabled (reciprocal, like most messengers).
  * `blocks` ({ byMe, byThem } sets) is optional; when given, blocked relations hide last-seen
- * and are reported under `blocked`.
+ * and, for direct chats, are reported under `blocked`. Former group members stay in the list
+ * with `leftAt` set so their old messages keep a name; clients hide them from member lists.
  */
 export function serializeConversation(conversation, viewer, { blocks } = {}) {
   const c = plain(conversation);
@@ -115,6 +139,7 @@ export function serializeConversation(conversation, viewer, { blocks } = {}) {
   const viewerShowsReceipts =
     (viewerDoc && typeof viewerDoc === "object" ? viewerDoc.privacy?.readReceipts : true) !== false;
   const now = Date.now();
+  const isGroup = c.type === "group";
 
   let blockedByMe = false;
   let blockedByThem = false;
@@ -125,7 +150,7 @@ export function serializeConversation(conversation, viewer, { blocks } = {}) {
     const showRead = isViewer || (viewerShowsReceipts && user?.privacy?.readReceipts !== false);
     const byMe = Boolean(blocks?.byMe?.has(userId));
     const byThem = Boolean(blocks?.byThem?.has(userId));
-    if (!isViewer) {
+    if (!isViewer && !isGroup) {
       blockedByMe ||= byMe;
       blockedByThem ||= byThem;
     }
@@ -135,6 +160,7 @@ export function serializeConversation(conversation, viewer, { blocks } = {}) {
       userId,
       role: p.role ?? "member",
       joinedAt: p.joinedAt ?? null,
+      leftAt: p.leftAt ?? null,
       lastReadAt: showRead ? (p.lastReadAt ?? null) : null,
       lastDeliveredAt: p.lastDeliveredAt ?? null,
       user: serializedUser,
@@ -143,18 +169,24 @@ export function serializeConversation(conversation, viewer, { blocks } = {}) {
 
   const mine = (c.participants ?? []).find((p) => idOf(p.userId) === viewerId);
   const mutedUntil = mine?.mutedUntil ?? null;
+  const memberCount = participants.filter((p) => !p.leftAt).length;
 
   return {
     _id: String(c._id),
     type: c.type ?? "direct",
     participants,
     createdBy: c.createdBy ? String(c.createdBy) : null,
-    group:
-      c.type === "group"
-        ? { name: c.group?.name ?? null, avatar: { url: c.group?.avatar?.url ?? null } }
-        : null,
+    group: isGroup
+      ? {
+          name: c.group?.name ?? null,
+          description: c.group?.description ?? "",
+          avatar: { url: c.group?.avatar?.url ?? null },
+          memberCount,
+        }
+      : null,
     blocked: blocks ? { byMe: blockedByMe, byThem: blockedByThem } : undefined,
     me: {
+      role: mine?.role ?? "member",
       lastReadAt: mine?.lastReadAt ?? null,
       lastDeliveredAt: mine?.lastDeliveredAt ?? null,
       mutedUntil,
@@ -171,6 +203,7 @@ export function serializeConversation(conversation, viewer, { blocks } = {}) {
           type: c.lastMessage.type ?? "text",
           text: c.lastMessage.deletedAt ? "" : (c.lastMessage.text ?? ""),
           hasAttachments: c.lastMessage.deletedAt ? false : Boolean(c.lastMessage.hasAttachments),
+          system: c.lastMessage.type === "system" ? serializeSystem(c.lastMessage.system) : null,
           deletedAt: c.lastMessage.deletedAt ?? null,
           createdAt: c.lastMessage.createdAt,
         }

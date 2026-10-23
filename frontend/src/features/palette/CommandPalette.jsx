@@ -16,7 +16,7 @@ import { useAuthStore } from "../../stores/useAuthStore";
 import { useConversationStore } from "../../stores/useConversationStore";
 import { useThemeStore } from "../../stores/useThemeStore";
 import { useUIStore } from "../../stores/useUIStore";
-import { conversationTitle } from "../conversations/conversationHelpers";
+import { conversationAvatarUser, conversationTitle } from "../conversations/conversationHelpers";
 import Avatar from "../../components/ui/Avatar";
 import Dialog from "../../components/ui/Dialog";
 
@@ -48,7 +48,7 @@ export default function CommandPalette() {
         group: "Chats",
         label: conversationTitle(c, me._id),
         hint: c.me?.unread ? `${c.me.unread} unread` : "",
-        avatar: c.participants.find((p) => p.userId !== me._id)?.user,
+        avatar: conversationAvatarUser(c, me._id),
         keywords: c.participants.map((p) => p.user?.username ?? "").join(" "),
         run: run(() => navigate(`/c/${c._id}`)),
       }));

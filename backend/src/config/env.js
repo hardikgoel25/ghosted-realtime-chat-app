@@ -7,6 +7,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Always load backend/.env, regardless of the cwd the process was started from
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+/** "true"/"1"/"yes"/"on" and "false"/"0"/"no"/"off"; unset or empty means the default. */
+const flag = (defaultValue) =>
+  z
+    .string()
+    .optional()
+    .transform((s) => {
+      const v = (s ?? "").trim().toLowerCase();
+      if (v === "") return defaultValue;
+      return !["0", "false", "no", "off"].includes(v);
+    });
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(5001),
@@ -49,6 +60,22 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default("Ghosted <no-reply@ghosted.app>"),
   // Public URL of the web app, used in email links. Defaults to the first CLIENT_ORIGINS entry.
   APP_URL: z.string().optional(),
+
+  // ---- Phase 3 feature flags (each feature ships independently) ----
+  FEATURE_GROUPS: flag(true),
+  FEATURE_LINK_PREVIEWS: flag(true),
+  FEATURE_TWO_FACTOR: flag(true),
+  // Name shown in authenticator apps next to the account
+  TOTP_ISSUER: z.string().trim().min(1).max(40).default("Ghosted"),
+  // Web Push is enabled when a VAPID key pair is present (npx web-push generate-vapid-keys)
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  // mailto: or https: contact for push services; defaults to a mailto built from EMAIL_FROM
+  VAPID_SUBJECT: z.string().optional(),
+  // Redis enables the Socket.IO adapter and shared presence across several API instances
+  REDIS_URL: z.string().optional(),
+  // Lets link previews target private addresses; honoured outside production only (tests)
+  LINK_PREVIEW_ALLOW_PRIVATE: flag(false),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -64,13 +91,16 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+const nodeEnv = parsed.data.NODE_ENV;
+
 export const env = Object.freeze({
   ...parsed.data,
-  trustProxy: parsed.data.TRUST_PROXY ?? (parsed.data.NODE_ENV === "production" ? 1 : 0),
+  trustProxy: parsed.data.TRUST_PROXY ?? (nodeEnv === "production" ? 1 : 0),
   appUrl: (parsed.data.APP_URL || parsed.data.CLIENT_ORIGINS[0] || "http://localhost:5173").replace(
     /\/+$/,
     ""
   ),
+  LINK_PREVIEW_ALLOW_PRIVATE: nodeEnv !== "production" && parsed.data.LINK_PREVIEW_ALLOW_PRIVATE,
 });
 
 export const isProd = env.NODE_ENV === "production";

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, UserX } from "lucide-react";
+import { Loader2, Search, UserX, Users } from "lucide-react";
+import { LIMITS } from "@ghosted/shared";
 import { api } from "../../lib/api";
 import { useDebounce } from "../../hooks/useDebounce";
 import { useAuthStore } from "../../stores/useAuthStore";
@@ -9,14 +10,10 @@ import { useUIStore } from "../../stores/useUIStore";
 import Avatar from "../../components/ui/Avatar";
 import Dialog from "../../components/ui/Dialog";
 import Spinner from "../../components/ui/Spinner";
+import UserPicker from "./UserPicker";
 
-export default function NewChatDialog() {
-  const open = useUIStore((s) => s.newChatOpen);
-  const setOpen = useUIStore((s) => s.setNewChatOpen);
-  const openDirect = useConversationStore((s) => s.openDirect);
+function DirectTab({ onPicked }) {
   const onlineUsers = useAuthStore((s) => s.onlineUsers);
-  const navigate = useNavigate();
-
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -24,11 +21,6 @@ export default function NewChatDialog() {
   const debounced = useDebounce(query, 300);
 
   useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults([]);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     api
@@ -39,23 +31,19 @@ export default function NewChatDialog() {
     return () => {
       cancelled = true;
     };
-  }, [open, debounced]);
+  }, [debounced]);
 
   const pick = async (user) => {
     setBusyId(user._id);
     try {
-      const conversation = await openDirect(user._id);
-      setOpen(false);
-      navigate(`/c/${conversation._id}`);
-    } catch {
-      // toast shown by the API client
+      await onPicked(user);
     } finally {
       setBusyId(null);
     }
   };
 
   return (
-    <Dialog open={open} onClose={() => setOpen(false)} title="New chat">
+    <>
       <label className="input w-full">
         <Search className="size-4 opacity-50" aria-hidden="true" />
         <input
@@ -101,6 +89,119 @@ export default function NewChatDialog() {
           ))
         )}
       </div>
+    </>
+  );
+}
+
+function GroupTab({ onCreated }) {
+  const createGroup = useConversationStore((s) => s.createGroup);
+  const [name, setName] = useState("");
+  const [members, setMembers] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const canCreate = name.trim().length > 0 && members.length > 0 && !busy;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!canCreate) return;
+    setBusy(true);
+    try {
+      const conversation = await createGroup({
+        name: name.trim(),
+        memberIds: members.map((u) => u._id),
+      });
+      onCreated(conversation);
+    } catch {
+      // toast shown by the API client
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3" noValidate>
+      <label className="input w-full">
+        <Users className="size-4 opacity-50" aria-hidden="true" />
+        <input
+          type="text"
+          placeholder="Group name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={LIMITS.GROUP_NAME_MAX}
+          aria-label="Group name"
+          autoFocus
+        />
+      </label>
+      <UserPicker
+        selected={members}
+        onChange={setMembers}
+        max={LIMITS.GROUP_MEMBERS_MAX - 1}
+        autoFocus={false}
+      />
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <span className="text-xs text-base-content/50">
+          {members.length === 0
+            ? "Pick at least one person"
+            : `${members.length + 1} members including you`}
+        </span>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={!canCreate}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : "Create group"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export default function NewChatDialog() {
+  const open = useUIStore((s) => s.newChatOpen);
+  const setOpen = useUIStore((s) => s.setNewChatOpen);
+  const openDirect = useConversationStore((s) => s.openDirect);
+  const groupsEnabled = useAuthStore((s) => s.config?.features?.groups !== false);
+  const navigate = useNavigate();
+  const [tab, setTab] = useState("direct");
+
+  useEffect(() => {
+    if (!open) setTab("direct");
+  }, [open]);
+
+  const go = (conversation) => {
+    setOpen(false);
+    navigate(`/c/${conversation._id}`);
+  };
+
+  return (
+    <Dialog open={open} onClose={() => setOpen(false)} title="New chat">
+      {groupsEnabled && (
+        <div role="tablist" className="tabs tabs-box tabs-sm w-full mb-3" aria-label="Chat type">
+          {[
+            ["direct", "Direct message"],
+            ["group", "New group"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              className={`tab flex-1 ${tab === id ? "tab-active" : ""}`}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && tab === "group" ? (
+        <GroupTab onCreated={go} />
+      ) : open ? (
+        <DirectTab
+          onPicked={async (user) => {
+            try {
+              go(await openDirect(user._id));
+            } catch {
+              // toast shown by the API client
+            }
+          }}
+        />
+      ) : null}
     </Dialog>
   );
 }

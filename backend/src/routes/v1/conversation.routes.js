@@ -1,21 +1,32 @@
 import { Router } from "express";
 import {
+  LIMITS,
+  addMembersSchema,
   conversationFlagsSchema,
   conversationIdParamSchema,
   createDirectConversationSchema,
+  createGroupSchema,
   deleteMessageQuerySchema,
   editMessageSchema,
   listConversationsQuerySchema,
   listMessagesQuerySchema,
+  memberParamSchema,
+  memberRoleSchema,
   messageParamSchema,
   messageSearchQuerySchema,
   reactionParamSchema,
   sendMessageSchema,
+  updateGroupSchema,
 } from "@ghosted/shared";
 import * as conversations from "../../controllers/conversation.controller.js";
+import { requireFeature } from "../../config/features.js";
 import { requireAuth } from "../../middleware/auth.js";
-import { messageLimiter, uploadLimiterIfMultipart } from "../../middleware/rateLimit.js";
-import { messageUpload } from "../../middleware/upload.js";
+import {
+  messageLimiter,
+  uploadLimiter,
+  uploadLimiterIfMultipart,
+} from "../../middleware/rateLimit.js";
+import { imageUpload, messageUpload } from "../../middleware/upload.js";
 import { validate } from "../../middleware/validate.js";
 
 const router = Router();
@@ -27,6 +38,12 @@ router.post(
   "/direct",
   validate({ body: createDirectConversationSchema }),
   conversations.createDirect
+);
+router.post(
+  "/group",
+  requireFeature("groups"),
+  validate({ body: createGroupSchema }),
+  conversations.createGroup
 );
 
 router.get("/:conversationId", validate({ params: conversationIdParamSchema }), conversations.get);
@@ -45,6 +62,53 @@ router.delete(
   validate({ params: conversationIdParamSchema }),
   conversations.clear
 );
+
+// ---- group management (admins) ----
+
+// Mounted under /:conversationId, so the feature gate is per route (messages stay reachable)
+const groups = Router({ mergeParams: true });
+const gate = requireFeature("groups");
+groups.patch(
+  "/group",
+  gate,
+  validate({ params: conversationIdParamSchema, body: updateGroupSchema }),
+  conversations.updateGroup
+);
+groups.put(
+  "/group/avatar",
+  gate,
+  uploadLimiter,
+  imageUpload("avatar", LIMITS.AVATAR_MAX_BYTES),
+  validate({ params: conversationIdParamSchema }),
+  conversations.updateGroupAvatar
+);
+groups.delete(
+  "/group/avatar",
+  gate,
+  validate({ params: conversationIdParamSchema }),
+  conversations.removeGroupAvatar
+);
+groups.post(
+  "/members",
+  gate,
+  validate({ params: conversationIdParamSchema, body: addMembersSchema }),
+  conversations.addMembers
+);
+groups.delete(
+  "/members/:userId",
+  gate,
+  validate({ params: memberParamSchema }),
+  conversations.removeMember
+);
+groups.patch(
+  "/members/:userId",
+  gate,
+  validate({ params: memberParamSchema, body: memberRoleSchema }),
+  conversations.setMemberRole
+);
+router.use("/:conversationId", groups);
+
+// ---- messages ----
 
 router.get(
   "/:conversationId/messages",

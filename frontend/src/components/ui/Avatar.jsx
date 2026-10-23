@@ -1,3 +1,4 @@
+import { Users } from "lucide-react";
 import { initialsOf } from "../../lib/utils";
 
 const SIZES = {
@@ -8,8 +9,12 @@ const SIZES = {
   xl: "size-24 text-3xl",
 };
 const DOTS = { xs: "size-2", sm: "size-2.5", md: "size-3", lg: "size-3.5", xl: "size-5" };
+const ICONS = { xs: "size-3.5", sm: "size-4", md: "size-5", lg: "size-6", xl: "size-10" };
 
-/** User avatar with an optional presence dot. Pass `online` only when presence is known. */
+/**
+ * User (or group) avatar with an optional presence dot. Pass `online` only when presence is
+ * known. A `user.group` flag without a photo shows a people icon instead of initials.
+ */
 export default function Avatar({ user, size = "md", online, className = "" }) {
   const url = user?.avatar?.url;
   return (
@@ -27,7 +32,7 @@ export default function Avatar({ user, size = "md", online, className = "" }) {
           className={`${SIZES[size]} rounded-full bg-primary/15 text-primary font-semibold flex items-center justify-center`}
           aria-hidden="true"
         >
-          {initialsOf(user?.fullname)}
+          {user?.group ? <Users className={ICONS[size]} /> : initialsOf(user?.fullname)}
         </div>
       )}
       {online !== undefined && (

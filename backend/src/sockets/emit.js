@@ -1,6 +1,7 @@
 import { getIo } from "./io.js";
 
 export const userRoom = (userId) => `user:${userId}`;
+export const conversationRoom = (conversationId) => `conv:${conversationId}`;
 
 export function emitToUser(userId, event, payload) {
   getIo()?.to(userRoom(userId)).emit(event, payload);
@@ -8,6 +9,11 @@ export function emitToUser(userId, event, payload) {
 
 export function broadcast(event, payload) {
   getIo()?.emit(event, payload);
+}
+
+/** Removes every socket of a user from a room (e.g. after leaving a group). */
+export function leaveRoomForUser(userId, room) {
+  getIo()?.in(userRoom(userId)).socketsLeave(room);
 }
 
 /**

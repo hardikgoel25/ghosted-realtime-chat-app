@@ -9,9 +9,14 @@ import * as blockService from "./block.service.js";
 import { emitToUser } from "../sockets/emit.js";
 
 const MUTE_FOREVER = new Date("9999-12-31T00:00:00.000Z");
-const PARTICIPANT_POPULATE = "participants.userId";
+export const PARTICIPANT_POPULATE = "participants.userId";
 
 export const idOf = (value) => String(value?._id ?? value);
+
+/** Query fragment: the user is a current (not departed) participant. */
+export const memberMatch = (userId, extra = {}) => ({
+  participants: { $elemMatch: { userId, leftAt: null, ...extra } },
+});
 
 function encodeCursor(conversation) {
   return `${new Date(conversation.lastMessageAt).getTime()}_${conversation._id}`;
@@ -22,24 +27,34 @@ function decodeCursor(cursor) {
   return { lastMessageAt: new Date(Number(ms)), id };
 }
 
-/** Loads a conversation the user belongs to, with participants populated; 404 otherwise. */
+/** Loads a conversation the user currently belongs to, with participants populated. */
 export async function loadForMember(userId, conversationId) {
   const conv = await Conversation.findOne({
     _id: conversationId,
-    "participants.userId": userId,
+    ...memberMatch(userId),
   }).populate(PARTICIPANT_POPULATE);
   if (!conv) throw ApiError.notFound("Conversation not found");
   return conv;
 }
 
-export function otherParticipants(conversation, userId) {
-  const me = idOf(userId);
-  return conversation.participants.filter((p) => idOf(p.userId) !== me);
+/** Participants who have not left (groups keep former members for history). */
+export function activeParticipants(conversation) {
+  return conversation.participants.filter((p) => !p.leftAt);
 }
 
-/** Pushes this participant's personalised view of the conversation to all their devices. */
+export function otherParticipants(conversation, userId) {
+  const me = idOf(userId);
+  return activeParticipants(conversation).filter((p) => idOf(p.userId) !== me);
+}
+
+export function participantOf(conversation, userId) {
+  const id = idOf(userId);
+  return conversation.participants.find((p) => idOf(p.userId) === id) ?? null;
+}
+
+/** Pushes each current participant's personalised view of the conversation to their devices. */
 export function broadcastConversation(conversation, participantIds = null) {
-  for (const p of conversation.participants) {
+  for (const p of activeParticipants(conversation)) {
     const uid = idOf(p.userId);
     if (participantIds && !participantIds.includes(uid)) continue;
     const viewer = p.userId && typeof p.userId === "object" ? p.userId : uid;
@@ -90,9 +105,8 @@ export async function findOrCreateDirect(me, otherId) {
 
 export async function listConversations(me, { filter = "all", cursor, limit }) {
   const meId = me._id;
-  const participantMatch = { userId: meId, archived: filter === "archived" };
   const query = {
-    participants: { $elemMatch: participantMatch },
+    ...memberMatch(meId, { archived: filter === "archived" }),
     // Empty conversations are private to whoever started them until the first message
     $or: [{ lastMessage: { $ne: null } }, { createdBy: meId }],
   };
@@ -152,7 +166,7 @@ export async function updateFlags(me, conversationId, flags) {
   if (flags.unread) update.$max = { [`unread.${me._id}`]: 1 };
 
   const conversation = await Conversation.findOneAndUpdate(
-    { _id: conversationId, "participants.userId": me._id },
+    { _id: conversationId, ...memberMatch(me._id) },
     update,
     { new: true }
   ).populate(PARTICIPANT_POPULATE);
@@ -161,11 +175,11 @@ export async function updateFlags(me, conversationId, flags) {
   return viewFor(conversation, me);
 }
 
-/** Marks everything in the conversation as read by `me`, telling the other side if allowed. */
+/** Marks everything in the conversation as read by `me`, telling the others if allowed. */
 export async function markRead(me, conversationId) {
   const now = new Date();
   const conversation = await Conversation.findOneAndUpdate(
-    { _id: conversationId, "participants.userId": me._id },
+    { _id: conversationId, ...memberMatch(me._id) },
     {
       $max: { "participants.$.lastReadAt": now, "participants.$.lastDeliveredAt": now },
       $set: { [`unread.${me._id}`]: 0 },
@@ -194,7 +208,7 @@ export async function markRead(me, conversationId) {
  */
 export async function markDelivered(user, conversationIds = null) {
   const meId = user._id;
-  const filter = { "participants.userId": meId, lastMessage: { $ne: null } };
+  const filter = { ...memberMatch(meId), lastMessage: { $ne: null } };
   if (conversationIds) filter._id = { $in: conversationIds };
   const candidates = await Conversation.find(filter)
     .sort({ lastMessageAt: -1 })
@@ -216,7 +230,7 @@ export async function markDelivered(user, conversationIds = null) {
   );
   for (const c of pending) {
     for (const p of c.participants) {
-      if (idOf(p.userId) === idOf(meId)) continue;
+      if (p.leftAt || idOf(p.userId) === idOf(meId)) continue;
       emitToUser(idOf(p.userId), SOCKET_EVENTS.MESSAGE_STATUS, {
         conversationId: String(c._id),
         userId: idOf(meId),
@@ -232,7 +246,7 @@ export async function markDelivered(user, conversationIds = null) {
 export async function clearForMe(me, conversationId) {
   const now = new Date();
   const conversation = await Conversation.findOneAndUpdate(
-    { _id: conversationId, "participants.userId": me._id },
+    { _id: conversationId, ...memberMatch(me._id) },
     {
       $set: {
         "participants.$.clearedAt": now,
@@ -251,7 +265,7 @@ export async function clearForMe(me, conversationId) {
 /** Messages newer than `since` in conversations the user belongs to (reconnect catch-up). */
 export async function syncConversations(user, entries, { messagesMax }) {
   const ids = entries.map((e) => e.id);
-  const owned = await Conversation.find({ _id: { $in: ids }, "participants.userId": user._id })
+  const owned = await Conversation.find({ _id: { $in: ids }, ...memberMatch(user._id) })
     .select("_id participants")
     .lean();
   const ownedIds = new Set(owned.map((c) => String(c._id)));
@@ -272,13 +286,11 @@ export async function syncConversations(user, entries, { messagesMax }) {
   return result;
 }
 
+/** Ids of the current participants, or null when the user is not one of them. */
 export async function participantIdsOf(conversationId, userId) {
-  const conv = await Conversation.findOne({
-    _id: conversationId,
-    "participants.userId": userId,
-  })
-    .select("participants.userId")
+  const conv = await Conversation.findOne({ _id: conversationId, ...memberMatch(userId) })
+    .select("participants.userId participants.leftAt")
     .lean();
   if (!conv) return null;
-  return conv.participants.map((p) => idOf(p.userId));
+  return conv.participants.filter((p) => !p.leftAt).map((p) => idOf(p.userId));
 }

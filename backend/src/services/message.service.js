@@ -7,13 +7,18 @@ import { serializeMessage } from "../utils/serializers.js";
 import * as media from "./media.service.js";
 import * as presence from "./presence.service.js";
 import * as blocks from "./block.service.js";
+import { extractFirstUrl, schedulePreview } from "./linkPreview.service.js";
 import {
+  activeParticipants,
   broadcastConversation,
   idOf,
   loadForMember,
   otherParticipants,
+  participantOf,
 } from "./conversation.service.js";
 import { emitToUser } from "../sockets/emit.js";
+
+const isGroup = (conversation) => conversation.type === "group";
 
 function assertCounterpartsAvailable(conversation, me) {
   for (const p of otherParticipants(conversation, me._id)) {
@@ -25,12 +30,12 @@ function assertCounterpartsAvailable(conversation, me) {
   }
 }
 
-function emitToParticipants(conversation, event, payload) {
-  for (const p of conversation.participants) emitToUser(idOf(p.userId), event, payload);
+export function emitToParticipants(conversation, event, payload) {
+  for (const p of activeParticipants(conversation)) emitToUser(idOf(p.userId), event, payload);
 }
 
 function visibleFilter(conversation, me) {
-  const mine = conversation.participants.find((p) => idOf(p.userId) === idOf(me._id));
+  const mine = participantOf(conversation, me._id);
   const filter = { conversationId: conversation._id, deletedFor: { $ne: me._id } };
   if (mine?.clearedAt) filter.createdAt = { $gt: mine.clearedAt };
   return filter;
@@ -46,6 +51,12 @@ function typeOf(attachments) {
   if (attachments.length === 0) return "text";
   const kinds = new Set(attachments.map((a) => a.kind));
   return kinds.size === 1 ? [...kinds][0] : "file";
+}
+
+async function onlineAmong(ids) {
+  const online = [];
+  for (const id of ids) if (await presence.isOnline(id)) online.push(id);
+  return online;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -112,6 +123,7 @@ export async function searchMessages(me, conversationId, { q, cursor, limit }) {
   const filter = {
     ...visibleFilter(conversation, me),
     deletedAt: null,
+    type: { $ne: "system" },
     text: { $regex: escapeRegex(q), $options: "i" },
   };
   if (cursor) filter._id = { $lt: cursor };
@@ -163,10 +175,19 @@ async function buildAttachments(files, { audioDurationMs }) {
   return out;
 }
 
-async function applySendToConversation(conversation, message, { senderId, onlineIds }) {
+/**
+ * Records a new message on the conversation: last-message snapshot, cursors for the sender and
+ * for recipients who are online right now, unread counters (not for system messages), and
+ * un-archiving for everyone who is still a member.
+ */
+async function applySendToConversation(
+  conversation,
+  message,
+  { senderId, onlineIds, countUnread = true }
+) {
   const createdAt = message.createdAt;
   const others = otherParticipants(conversation, senderId).map((p) => idOf(p.userId));
-  const $inc = Object.fromEntries(others.map((id) => [`unread.${id}`, 1]));
+  const $inc = countUnread ? Object.fromEntries(others.map((id) => [`unread.${id}`, 1])) : {};
   const online = others.filter((id) => onlineIds.includes(id));
 
   return Conversation.findOneAndUpdate(
@@ -179,11 +200,12 @@ async function applySendToConversation(conversation, message, { senderId, online
           type: message.type,
           text: message.text,
           hasAttachments: message.attachments.length > 0,
+          system: message.system ?? null,
           deletedAt: null,
           createdAt,
         },
         lastMessageAt: createdAt,
-        // A new message brings an archived chat back for everyone
+        // A new message brings an archived chat back for every current member
         "participants.$[all].archived": false,
       },
       $max: {
@@ -191,12 +213,12 @@ async function applySendToConversation(conversation, message, { senderId, online
         "participants.$[sender].lastDeliveredAt": createdAt,
         "participants.$[online].lastDeliveredAt": createdAt,
       },
-      ...(others.length ? { $inc } : {}),
+      ...(Object.keys($inc).length ? { $inc } : {}),
     },
     {
       new: true,
       arrayFilters: [
-        { "all.userId": { $exists: true } },
+        { "all.leftAt": null },
         { "sender.userId": senderId },
         { "online.userId": { $in: online } },
       ],
@@ -207,11 +229,13 @@ async function applySendToConversation(conversation, message, { senderId, online
 export async function sendMessage(me, conversationId, body, files = {}) {
   const { text = "", clientId, replyTo, audioDurationMs } = body;
   const conversation = await loadForMember(me._id, conversationId);
-  assertCounterpartsAvailable(conversation, me);
-  await blocks.assertNotBlocked(
-    me._id,
-    otherParticipants(conversation, me._id).map((p) => idOf(p.userId))
-  );
+  if (!isGroup(conversation)) {
+    assertCounterpartsAvailable(conversation, me);
+    await blocks.assertNotBlocked(
+      me._id,
+      otherParticipants(conversation, me._id).map((p) => idOf(p.userId))
+    );
+  }
 
   const hasFiles = ["images", "files", "audio"].some((k) => (files[k] ?? []).length > 0);
   if (!text && !hasFiles) throw ApiError.badRequest("Message must contain text or an attachment");
@@ -227,6 +251,7 @@ export async function sendMessage(me, conversationId, body, files = {}) {
       conversationId: conversation._id,
       _id: replyTo,
       deletedAt: null,
+      type: { $ne: "system" },
     }).lean();
     if (!original) throw ApiError.badRequest("The message you are replying to is not available");
     replySnapshot = {
@@ -262,9 +287,9 @@ export async function sendMessage(me, conversationId, body, files = {}) {
     throw err;
   }
 
-  const onlineIds = otherParticipants(conversation, me._id)
-    .map((p) => idOf(p.userId))
-    .filter((id) => presence.isOnline(id));
+  const onlineIds = await onlineAmong(
+    otherParticipants(conversation, me._id).map((p) => idOf(p.userId))
+  );
   const updated = await applySendToConversation(conversation, doc, {
     senderId: me._id,
     onlineIds,
@@ -277,7 +302,43 @@ export async function sendMessage(me, conversationId, body, files = {}) {
   });
   broadcastConversation(updated);
 
-  return { message: payload, duplicate: false };
+  schedulePreview(doc, (fresh) =>
+    emitToParticipants(updated, SOCKET_EVENTS.MESSAGE_UPDATED, {
+      conversationId: String(updated._id),
+      message: serializeMessage(fresh),
+    })
+  );
+
+  return { message: payload, duplicate: false, conversation: updated, onlineIds };
+}
+
+/**
+ * Group events ("Alice added Bob") are stored as `system` messages: they appear in the timeline
+ * and refresh the sidebar preview, but never count as unread.
+ */
+export async function postSystemMessage(
+  conversation,
+  actorId,
+  { kind, targetIds = [], text = "" }
+) {
+  const doc = await Message.create({
+    conversationId: conversation._id,
+    senderId: actorId,
+    type: "system",
+    text: "",
+    system: { kind, targetIds, text },
+  });
+  const updated = await applySendToConversation(conversation, doc, {
+    senderId: actorId,
+    onlineIds: [],
+    countUnread: false,
+  });
+  emitToParticipants(updated, SOCKET_EVENTS.MESSAGE_NEW, {
+    conversationId: String(updated._id),
+    message: serializeMessage(doc),
+  });
+  broadcastConversation(updated);
+  return updated;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -303,7 +364,7 @@ async function refreshLastMessageIfNeeded(conversation, message) {
 export async function editMessage(me, conversationId, messageId, { text }) {
   const conversation = await loadForMember(me._id, conversationId);
   const message = await loadMessage(conversation, me, messageId);
-  if (idOf(message.senderId) !== idOf(me._id)) {
+  if (idOf(message.senderId) !== idOf(me._id) || message.type === "system") {
     throw ApiError.forbidden("You can only edit your own messages");
   }
   if (message.deletedAt) throw ApiError.badRequest("This message was deleted");
@@ -315,15 +376,20 @@ export async function editMessage(me, conversationId, messageId, { text }) {
   }
   if (message.text === text) return serializeMessage(message);
 
+  const linkChanged = extractFirstUrl(message.text) !== extractFirstUrl(text);
   message.text = text;
   message.editedAt = new Date();
+  if (linkChanged) message.linkPreview = null;
   await message.save();
 
   const payload = serializeMessage(message);
-  emitToParticipants(conversation, SOCKET_EVENTS.MESSAGE_UPDATED, {
-    conversationId: String(conversation._id),
-    message: payload,
-  });
+  const notify = (fresh) =>
+    emitToParticipants(conversation, SOCKET_EVENTS.MESSAGE_UPDATED, {
+      conversationId: String(conversation._id),
+      message: serializeMessage(fresh),
+    });
+  notify(message);
+  if (linkChanged) schedulePreview(message, notify);
   await refreshLastMessageIfNeeded(conversation, message);
   return payload;
 }
@@ -342,8 +408,14 @@ export async function deleteMessage(me, conversationId, messageId, scope) {
     return { scope: "me" };
   }
 
-  if (idOf(message.senderId) !== idOf(me._id)) {
-    throw ApiError.forbidden("You can only delete your own messages for everyone");
+  const mine = idOf(message.senderId) === idOf(me._id);
+  const admin = isGroup(conversation) && participantOf(conversation, me._id)?.role === "admin";
+  if (message.type === "system" || (!mine && !admin)) {
+    throw ApiError.forbidden(
+      admin
+        ? "System messages cannot be deleted"
+        : "You can only delete your own messages for everyone"
+    );
   }
   if (!message.deletedAt) {
     const assets = message.attachments.map((a) => ({
@@ -355,6 +427,7 @@ export async function deleteMessage(me, conversationId, messageId, scope) {
     message.attachments = [];
     message.reactions = [];
     message.replyTo = null;
+    message.linkPreview = null;
     await message.save();
     void media.destroyAssets(assets);
   }
@@ -383,6 +456,7 @@ export async function addReaction(me, conversationId, messageId, emoji) {
   const conversation = await loadForMember(me._id, conversationId);
   const message = await loadMessage(conversation, me, messageId);
   if (message.deletedAt) throw ApiError.badRequest("This message was deleted");
+  if (message.type === "system") throw ApiError.badRequest("You can't react to this message");
 
   const joined = await Message.updateOne(
     { _id: message._id, "reactions.emoji": emoji },

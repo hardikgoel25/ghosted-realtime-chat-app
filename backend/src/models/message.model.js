@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { ATTACHMENT_KINDS, LIMITS, MESSAGE_TYPES } from "@ghosted/shared";
+import { ATTACHMENT_KINDS, LIMITS, MESSAGE_TYPES, SYSTEM_MESSAGE_KINDS } from "@ghosted/shared";
 
 const { Schema } = mongoose;
 
@@ -40,6 +40,29 @@ const reactionSchema = new Schema(
   { _id: false }
 );
 
+// Group events ("Alice added Bob"); senderId is the actor, targetIds the people concerned
+const systemSchema = new Schema(
+  {
+    kind: { type: String, enum: SYSTEM_MESSAGE_KINDS, required: true },
+    targetIds: { type: [Schema.Types.ObjectId], default: [] },
+    text: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
+// Server-fetched summary of the first link in the text (see linkPreview.service)
+const linkPreviewSchema = new Schema(
+  {
+    url: { type: String, required: true },
+    title: { type: String, default: null },
+    description: { type: String, default: null },
+    siteName: { type: String, default: null },
+    image: { type: String, default: null },
+    fetchedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const messageSchema = new Schema(
   {
     conversationId: { type: Schema.Types.ObjectId, ref: "Conversation", required: true },
@@ -51,6 +74,8 @@ const messageSchema = new Schema(
     attachments: { type: [attachmentSchema], default: [] },
     replyTo: { type: replyToSchema, default: null },
     reactions: { type: [reactionSchema], default: [] },
+    system: { type: systemSchema, default: null },
+    linkPreview: { type: linkPreviewSchema, default: null },
     editedAt: { type: Date, default: null },
     // "Delete for everyone": content is wiped, the placeholder stays
     deletedAt: { type: Date, default: null },

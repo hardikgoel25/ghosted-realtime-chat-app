@@ -1,9 +1,10 @@
 import { LIMITS, SOCKET_EVENTS, conversationRoomSchema, syncSchema } from "@ghosted/shared";
 import { participantIdsOf, syncConversations } from "../../services/conversation.service.js";
 import { serializeMessage } from "../../utils/serializers.js";
-import { conversationCache } from "./typing.js";
+import { conversationRoom } from "../emit.js";
+import { rememberParticipants } from "./typing.js";
 
-export const conversationRoom = (conversationId) => `conv:${conversationId}`;
+export { conversationRoom };
 
 export function registerConversationHandlers(socket) {
   const { user, userId } = socket.data;
@@ -14,7 +15,7 @@ export function registerConversationHandlers(socket) {
     const { conversationId } = parsed.data;
     const participants = await participantIdsOf(conversationId, userId);
     if (!participants) return ack?.({ ok: false, error: "NOT_FOUND" });
-    conversationCache(socket).set(conversationId, participants);
+    rememberParticipants(socket, conversationId, participants);
     socket.join(conversationRoom(conversationId));
     ack?.({ ok: true });
   });

@@ -69,6 +69,14 @@ export const useMessageStore = create((set, get) => {
 
     stateFor: (id) => get().byConversation[id] ?? EMPTY,
 
+    forget: (id) =>
+      set((s) => {
+        if (!s.byConversation[id]) return {};
+        const byConversation = { ...s.byConversation };
+        delete byConversation[id];
+        return { byConversation };
+      }),
+
     /** Latest page (also used to leave a search window and return to the bottom). */
     load: async (id) => {
       const current = get().stateFor(id);

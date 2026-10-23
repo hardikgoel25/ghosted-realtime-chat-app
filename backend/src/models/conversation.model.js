@@ -1,13 +1,20 @@
 import mongoose from "mongoose";
-import { CONVERSATION_TYPES, MESSAGE_TYPES } from "@ghosted/shared";
+import {
+  CONVERSATION_TYPES,
+  MESSAGE_TYPES,
+  PARTICIPANT_ROLES,
+  SYSTEM_MESSAGE_KINDS,
+} from "@ghosted/shared";
 
 const { Schema } = mongoose;
 
 const participantSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    role: { type: String, enum: ["member", "admin"], default: "member" },
+    role: { type: String, enum: PARTICIPANT_ROLES, default: "member" },
     joinedAt: { type: Date, default: Date.now },
+    // Groups keep former members (with leftAt set) so their old messages still show a name
+    leftAt: { type: Date, default: null },
     // Read/delivery cursors: every message created at or before these is seen/delivered
     lastReadAt: { type: Date, default: null },
     lastDeliveredAt: { type: Date, default: null },
@@ -20,6 +27,15 @@ const participantSchema = new Schema(
   { _id: false }
 );
 
+const systemSnapshotSchema = new Schema(
+  {
+    kind: { type: String, enum: SYSTEM_MESSAGE_KINDS, required: true },
+    targetIds: { type: [Schema.Types.ObjectId], default: [] },
+    text: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const lastMessageSchema = new Schema(
   {
     _id: { type: Schema.Types.ObjectId, required: true },
@@ -27,6 +43,7 @@ const lastMessageSchema = new Schema(
     type: { type: String, enum: MESSAGE_TYPES, default: "text" },
     text: { type: String, default: "" },
     hasAttachments: { type: Boolean, default: false },
+    system: { type: systemSnapshotSchema, default: null },
     deletedAt: { type: Date, default: null },
     createdAt: { type: Date, required: true },
   },
@@ -42,6 +59,7 @@ const conversationSchema = new Schema(
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     group: {
       name: { type: String, default: null },
+      description: { type: String, default: "" },
       avatar: {
         url: { type: String, default: null },
         publicId: { type: String, default: null },

@@ -6,6 +6,7 @@ import {
   Bell,
   BellOff,
   CheckCheck,
+  LogOut,
   MailOpen,
   Pin,
   PinOff,
@@ -18,7 +19,13 @@ import { listTime } from "../../lib/format";
 import Avatar from "../../components/ui/Avatar";
 import ContextMenu from "../../components/ui/ContextMenu";
 import Dialog from "../../components/ui/Dialog";
-import { conversationAvatarUser, conversationTitle, previewFor } from "./conversationHelpers";
+import {
+  conversationAvatarUser,
+  conversationTitle,
+  isGroup,
+  memberName,
+  previewFor,
+} from "./conversationHelpers";
 
 export default function ConversationItem({ conversation }) {
   const me = useAuthStore((s) => s.authUser);
@@ -35,11 +42,11 @@ export default function ConversationItem({ conversation }) {
   const longPress = useLongPress((point) => point && setMenu(point));
 
   const id = conversation._id;
+  const group = isGroup(conversation);
   const active = conversationId === id;
   const user = conversationAvatarUser(conversation, me._id);
-  const online =
-    conversation.type === "direct" && user ? onlineUsers.includes(user._id) : undefined;
-  const isTyping = Boolean(typing && Object.keys(typing).some((uid) => uid !== me._id));
+  const online = !group && user ? onlineUsers.includes(user._id) : undefined;
+  const typingIds = Object.keys(typing ?? {}).filter((uid) => uid !== me._id);
   const { unread = 0, muted, pinned, archived } = conversation.me ?? {};
 
   const items = [
@@ -71,8 +78,8 @@ export default function ConversationItem({ conversation }) {
       onSelect: () => setFlags(id, { archived: !archived }),
     },
     {
-      label: "Delete chat",
-      icon: <Trash2 className="size-4" />,
+      label: group ? "Leave group" : "Delete chat",
+      icon: group ? <LogOut className="size-4" /> : <Trash2 className="size-4" />,
       danger: true,
       onSelect: () => setConfirmDelete(true),
     },
@@ -104,8 +111,12 @@ export default function ConversationItem({ conversation }) {
             <span
               className={`truncate text-sm ${unread ? "text-base-content" : "text-base-content/60"}`}
             >
-              {isTyping ? (
-                <span className="text-primary">typing…</span>
+              {typingIds.length > 0 ? (
+                <span className="text-primary">
+                  {group
+                    ? `${typingIds.map((uid) => memberName(conversation, uid, me._id)).join(", ")} typing…`
+                    : "typing…"}
+                </span>
               ) : (
                 previewFor(conversation, me._id)
               )}
@@ -127,7 +138,7 @@ export default function ConversationItem({ conversation }) {
       <Dialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title="Delete this chat?"
+        title={group ? `Leave ${conversation.group?.name ?? "this group"}?` : "Delete this chat?"}
         size="sm"
         footer={
           <>
@@ -142,15 +153,15 @@ export default function ConversationItem({ conversation }) {
                 await clearChat(id);
               }}
             >
-              Delete
+              {group ? "Leave" : "Delete"}
             </button>
           </>
         }
       >
         <p className="text-sm text-base-content/70">
-          This removes the messages from your side only.{" "}
-          {user?.fullname?.split(" ")[0] ?? "The other person"} keeps their copy, and new messages
-          will still reach you.
+          {group
+            ? "You will stop receiving messages from this group. An admin can add you back later."
+            : `This removes the messages from your side only. ${user?.fullname?.split(" ")[0] ?? "The other person"} keeps their copy, and new messages will still reach you.`}
         </p>
       </Dialog>
     </>

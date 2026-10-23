@@ -6,6 +6,7 @@ import Spinner from "../../components/ui/Spinner";
 import MessageBubble from "./MessageBubble";
 import Lightbox from "./Lightbox";
 import { annotateMessages } from "./messageStatus";
+import { isGroup } from "../conversations/conversationHelpers";
 
 // Virtuoso needs a large starting index so older pages can be prepended without reflow
 const START_INDEX = 1_000_000;
@@ -39,6 +40,15 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
   );
   const firstItemIndex = START_INDEX - state.olderLoaded;
   const anchorIndex = state.anchorId ? rows.findIndex((r) => r.message._id === state.anchorId) : -1;
+  // "Seen by" avatars go under my most recent message in a group
+  const lastMineId = useMemo(() => {
+    if (!isGroup(conversation)) return null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const m = rows[i].message;
+      if (m.senderId === meId && m.type !== "system" && !m.pending && !m.failed) return m._id;
+    }
+    return null;
+  }, [rows, conversation, meId]);
 
   // React to appended messages: scroll for our own, count the others while scrolled up
   const lastId = rows.at(-1)?.message._id ?? null;
@@ -109,6 +119,7 @@ export default function MessageList({ conversation, state, meId, unreadMarker })
             conversation={conversation}
             meId={meId}
             highlighted={row.message._id === state.anchorId}
+            showReaders={row.message._id === lastMineId}
             onOpenImage={(urls, index) => setLightbox({ urls, index })}
             onJumpTo={(messageId) => loadAround(conversation._id, messageId)}
           />

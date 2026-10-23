@@ -27,10 +27,27 @@ import Dialog from "../../components/ui/Dialog";
 import EmojiPicker from "../../components/ui/EmojiPicker";
 import AudioPlayer from "./AudioPlayer";
 import FileChip from "./FileChip";
+import LinkPreviewCard from "./LinkPreviewCard";
 import MessageInfoDialog from "./MessageInfoDialog";
 import { messageStatus } from "./messageStatus";
+import {
+  isGroup,
+  isGroupAdmin,
+  memberName,
+  participantUser,
+  readersOf,
+  systemMessageText,
+} from "../conversations/conversationHelpers";
 
 const COLLAPSE_AT = 700;
+const SENDER_COLORS = [
+  "text-primary",
+  "text-secondary",
+  "text-accent",
+  "text-info",
+  "text-success",
+  "text-warning",
+];
 
 function StatusTicks({ status }) {
   switch (status) {
@@ -67,10 +84,64 @@ function renderText(text) {
   );
 }
 
+function senderColor(userId = "") {
+  let h = 0;
+  for (const ch of userId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return SENDER_COLORS[h % SENDER_COLORS.length];
+}
+
 const pointOf = (el) => {
   const r = el.getBoundingClientRect();
   return { clientX: r.left, clientY: r.bottom + 4 };
 };
+
+function DayPill({ message, showDay }) {
+  if (!showDay) return null;
+  return (
+    <div className="flex justify-center py-3">
+      <span className="badge badge-ghost badge-sm">{dayLabel(message.createdAt)}</span>
+    </div>
+  );
+}
+
+/** Centred notice for group events ("Alice added Bob"). */
+function SystemNotice({ row, conversation, meId }) {
+  const text = systemMessageText(row.message, conversation, meId);
+  return (
+    <div className="px-3 sm:px-5">
+      <DayPill message={row.message} showDay={row.showDay} />
+      <div className="flex justify-center py-1" role="status">
+        <span className="badge badge-ghost badge-sm h-auto py-1 px-3 whitespace-normal text-center text-[11px] text-base-content/70">
+          {text}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SeenBy({ readers }) {
+  if (readers.length === 0) return null;
+  const names = readers.map((p) => p.user?.fullname?.split(" ")[0] ?? "Someone");
+  return (
+    <div
+      className="flex items-center justify-end -space-x-1 mt-1"
+      title={`Seen by ${names.join(", ")}`}
+      aria-label={`Seen by ${names.join(", ")}`}
+    >
+      {readers.slice(0, 5).map((p) => (
+        <Avatar
+          key={p.userId}
+          user={p.user}
+          size="xs"
+          className="ring-2 ring-base-100 rounded-full"
+        />
+      ))}
+      {readers.length > 5 && (
+        <span className="text-[10px] text-base-content/60 pl-2">+{readers.length - 5}</span>
+      )}
+    </div>
+  );
+}
 
 export default function MessageBubble({
   row,
@@ -79,6 +150,7 @@ export default function MessageBubble({
   onOpenImage,
   onJumpTo,
   highlighted,
+  showReaders = false,
 }) {
   const { message, showDay, groupStart, groupEnd, firstUnread } = row;
   const retry = useMessageStore((s) => s.retry);
@@ -94,10 +166,11 @@ export default function MessageBubble({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  const group = isGroup(conversation);
   const mine = message.senderId === meId;
   const deleted = Boolean(message.deletedAt);
   const local = message.pending || message.failed;
-  const sender = conversation.participants.find((p) => p.userId === message.senderId)?.user;
+  const sender = participantUser(conversation, message.senderId);
   const status = messageStatus(message, conversation, meId);
   const attachments = message.attachments ?? [];
   const images = attachments.filter((a) => (a.kind ?? "image") === "image");
@@ -114,15 +187,17 @@ export default function MessageBubble({
     !deleted &&
     !local &&
     Date.now() - new Date(message.createdAt).getTime() < LIMITS.MESSAGE_EDIT_WINDOW_MS;
+  const canDeleteForEveryone = !deleted && !local && (mine || isGroupAdmin(conversation, meId));
   const interactive = !deleted && !local;
+  const readers = showReaders && mine && group ? readersOf(message, conversation, meId) : [];
 
   const longPress = useLongPress((point) => interactive && point && setMenu(point));
 
-  const nameOf = (id) =>
-    id === meId
-      ? "You"
-      : (conversation.participants.find((p) => p.userId === id)?.user?.fullname?.split(" ")[0] ??
-        "Someone");
+  if (message.type === "system") {
+    return <SystemNotice row={row} conversation={conversation} meId={meId} />;
+  }
+
+  const nameOf = (id) => memberName(conversation, id, meId);
 
   const toggleReaction = (emoji) =>
     react(conversation._id, message._id, emoji, !myReactions.has(emoji));
@@ -155,7 +230,7 @@ export default function MessageBubble({
           icon: <Trash2 className="size-4" />,
           onSelect: () => remove(conversation._id, message._id, "me"),
         },
-        mine && {
+        canDeleteForEveryone && {
           label: "Delete for everyone",
           icon: <Trash2 className="size-4" />,
           danger: true,
@@ -221,11 +296,7 @@ export default function MessageBubble({
 
   return (
     <div className="px-3 sm:px-5">
-      {showDay && (
-        <div className="flex justify-center py-3">
-          <span className="badge badge-ghost badge-sm">{dayLabel(message.createdAt)}</span>
-        </div>
-      )}
+      <DayPill message={message} showDay={showDay} />
       {firstUnread && (
         <div className="flex items-center gap-3 py-2 text-xs text-primary" role="separator">
           <span className="flex-1 h-px bg-primary/40" />
@@ -254,6 +325,13 @@ export default function MessageBubble({
             } ${message.failed ? "ring-1 ring-error" : ""} ${highlighted ? "bubble-highlight" : ""} select-text`}
             {...longPress}
           >
+            {group && !mine && groupStart && !deleted && (
+              <span
+                className={`block text-xs font-semibold mb-0.5 ${senderColor(message.senderId)}`}
+              >
+                {sender?.fullname ?? "A former member"}
+              </span>
+            )}
             {deleted ? (
               <p className="flex items-center gap-1.5 text-sm italic opacity-70">
                 <Ban className="size-3.5" aria-hidden="true" /> This message was deleted
@@ -355,6 +433,9 @@ export default function MessageBubble({
                     {expanded ? "Show less" : "Show more"}
                   </button>
                 )}
+                {message.linkPreview && (
+                  <LinkPreviewCard preview={message.linkPreview} mine={mine} />
+                )}
               </>
             )}
 
@@ -393,6 +474,8 @@ export default function MessageBubble({
               ))}
             </div>
           )}
+
+          <SeenBy readers={readers} />
 
           {message.failed && (
             <div className="flex items-center gap-2 mt-1 text-xs text-error">

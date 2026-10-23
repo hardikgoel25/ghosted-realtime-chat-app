@@ -28,6 +28,18 @@ export const LIMITS = Object.freeze({
   SYNC_CONVERSATIONS_MAX: 20,
   SYNC_MESSAGES_MAX: 100,
   MUTE_MINUTES_MAX: 60 * 24 * 365,
+  GROUP_NAME_MIN: 1,
+  GROUP_NAME_MAX: 60,
+  GROUP_DESCRIPTION_MAX: 200,
+  GROUP_MEMBERS_MAX: 100,
+  GROUP_ADD_BATCH_MAX: 50,
+  LINK_PREVIEW_TIMEOUT_MS: 5000,
+  LINK_PREVIEW_MAX_BYTES: 1024 * 1024,
+  LINK_PREVIEW_TITLE_MAX: 120,
+  LINK_PREVIEW_DESCRIPTION_MAX: 240,
+  TOTP_DIGITS: 6,
+  TOTP_RECOVERY_CODES: 10,
+  PUSH_ENDPOINT_MAX: 2048,
 });
 
 export const USERNAME_REGEX = /^[a-z0-9_.]{3,25}$/;
@@ -77,6 +89,20 @@ export const CONVERSATION_TYPES = Object.freeze(["direct", "group"]);
 export const CONVERSATION_FILTERS = Object.freeze(["all", "unread", "archived"]);
 export const MESSAGE_TYPES = Object.freeze(["text", "image", "file", "audio", "system"]);
 export const ATTACHMENT_KINDS = Object.freeze(["image", "file", "audio"]);
+export const PARTICIPANT_ROLES = Object.freeze(["member", "admin"]);
+
+/** Events recorded in a group as `type: "system"` messages. */
+export const SYSTEM_MESSAGE_KINDS = Object.freeze([
+  "group_created",
+  "group_renamed",
+  "group_description",
+  "group_avatar",
+  "member_added",
+  "member_removed",
+  "member_left",
+  "admin_granted",
+  "admin_revoked",
+]);
 
 export const QUICK_REACTIONS = Object.freeze(["👍", "❤️", "😂", "😮", "😢", "🙏"]);
 
@@ -99,6 +125,7 @@ export const SOCKET_EVENTS = Object.freeze({
   MESSAGE_REACTION: "message:reaction",
   MESSAGE_STATUS: "message:status",
   CONVERSATION_UPDATED: "conversation:updated",
+  CONVERSATION_REMOVED: "conversation:removed",
   TYPING: "typing",
   USER_UPDATED: "user:updated",
   USER_DISABLED: "user:disabled",
@@ -130,6 +157,10 @@ export const ERROR_CODES = Object.freeze({
   RATE_LIMITED: "RATE_LIMITED",
   MEDIA_UNAVAILABLE: "MEDIA_UNAVAILABLE",
   EMAIL_UNAVAILABLE: "EMAIL_UNAVAILABLE",
+  FEATURE_DISABLED: "FEATURE_DISABLED",
+  TWO_FACTOR_REQUIRED: "TWO_FACTOR_REQUIRED",
+  TWO_FACTOR_INVALID: "TWO_FACTOR_INVALID",
+  PUSH_UNAVAILABLE: "PUSH_UNAVAILABLE",
   INTERNAL: "INTERNAL_ERROR",
 });
 

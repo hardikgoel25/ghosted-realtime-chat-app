@@ -10,7 +10,11 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { useConversationStore } from "../stores/useConversationStore";
 import { useMessageStore } from "../stores/useMessageStore";
 import { useUIStore } from "../stores/useUIStore";
-import { otherParticipant } from "../features/conversations/conversationHelpers";
+import {
+  conversationTitle,
+  isGroup,
+  memberName,
+} from "../features/conversations/conversationHelpers";
 
 /**
  * Owns the socket for the lifetime of a login: connects, wires every server event to the
@@ -53,7 +57,7 @@ export default function SocketBridge() {
     const onMessageNew = ({ conversationId, message }) => {
       messages().receive(message);
       const me = auth().authUser;
-      if (!me || message.senderId === me._id) return;
+      if (!me || message.senderId === me._id || message.type === "system") return;
 
       const conv = conversations().byId[conversationId];
       const prefs = me.notificationPrefs ?? {};
@@ -70,9 +74,15 @@ export default function SocketBridge() {
       if (conv?.me?.muted) return;
       if (prefs.sound !== false) playReceiveSound();
 
-      const sender = otherParticipant(conv, me._id)?.user;
-      const title = sender?.fullname ?? "New message";
-      const body = prefs.preview === false ? "New message" : messagePreview(message);
+      const group = isGroup(conv);
+      const sender = memberName(conv, message.senderId, me._id);
+      const title = conv ? conversationTitle(conv, me._id) : "New message";
+      const body =
+        prefs.preview === false
+          ? "New message"
+          : group
+            ? `${sender}: ${messagePreview(message)}`
+            : messagePreview(message);
       if (document.visibilityState === "visible") {
         toast(title, {
           description: body,
@@ -94,6 +104,20 @@ export default function SocketBridge() {
     const onMessageReaction = ({ conversationId, messageId, reactions }) =>
       messages().setReactions(conversationId, messageId, reactions);
     const onConversationUpdated = ({ conversation }) => conversations().upsert(conversation);
+    const onConversationRemoved = ({ conversationId, reason }) => {
+      conversations().remove(conversationId);
+      messages().forget(conversationId);
+      if (ui().activeConversationId === conversationId) {
+        toast(
+          reason === "removed"
+            ? "You were removed from this group"
+            : reason === "deleted"
+              ? "This group was deleted"
+              : "You left the group"
+        );
+        navigate("/", { replace: true });
+      }
+    };
     const onMessageStatus = (payload) => conversations().applyStatus(payload);
     const onTyping = ({ conversationId, userId, isTyping }) =>
       conversations().setTyping(conversationId, userId, isTyping);
@@ -128,6 +152,7 @@ export default function SocketBridge() {
     socket.on(SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);
     socket.on(SOCKET_EVENTS.MESSAGE_REACTION, onMessageReaction);
     socket.on(SOCKET_EVENTS.CONVERSATION_UPDATED, onConversationUpdated);
+    socket.on(SOCKET_EVENTS.CONVERSATION_REMOVED, onConversationRemoved);
     socket.on(SOCKET_EVENTS.MESSAGE_STATUS, onMessageStatus);
     socket.on(SOCKET_EVENTS.TYPING, onTyping);
     socket.on(SOCKET_EVENTS.PRESENCE_SNAPSHOT, onPresenceSnapshot);

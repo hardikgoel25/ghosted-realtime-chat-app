@@ -49,6 +49,14 @@ export async function openDirect(a, otherUserId) {
   return res.body.data.conversation;
 }
 
+export async function createGroup(a, name, memberIds, extra = {}) {
+  const res = await a.post("/api/v1/conversations/group").send({ name, memberIds, ...extra });
+  if (res.status !== 201) {
+    throw new Error(`createGroup failed (${res.status}): ${JSON.stringify(res.body)}`);
+  }
+  return res.body.data.conversation;
+}
+
 export function sendText(a, conversationId, text, extra = {}) {
   return a.post(`/api/v1/conversations/${conversationId}/messages`).send({ text, ...extra });
 }

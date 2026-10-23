@@ -20,7 +20,7 @@ import { useUIStore } from "../../stores/useUIStore";
 import EmojiPicker from "../../components/ui/EmojiPicker";
 import FileChip from "./FileChip";
 import VoiceRecorder from "./VoiceRecorder";
-import { otherParticipant } from "../conversations/conversationHelpers";
+import { memberName, otherParticipant } from "../conversations/conversationHelpers";
 
 const TYPING_STOP_MS = 3000;
 const MAX_HEIGHT_PX = 160;
@@ -300,7 +300,7 @@ const Composer = forwardRef(function Composer({ conversation }, ref) {
     : replyTo
       ? {
           icon: Reply,
-          label: `Replying to ${replyTo.senderId === me._id ? "yourself" : (other?.fullname?.split(" ")[0] ?? "message")}`,
+          label: `Replying to ${replyTo.senderId === me._id ? "yourself" : memberName(conversation, replyTo.senderId, me._id)}`,
           preview: messagePreview(replyTo),
         }
       : null;
