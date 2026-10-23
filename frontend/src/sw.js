@@ -9,7 +9,7 @@ import { NavigationRoute, registerRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
 
 /**
- * Service worker: precaches the app shell (so the UI opens offline), caches chat images from
+ * Service worker (v2): precaches the app shell (so the UI opens offline), caches chat images from
  * Cloudinary for a week, never caches the API or the socket, and shows Web Push notifications.
  * Activation waits for the page to ask (SKIP_WAITING) so a running session is not swapped
  * under the user's feet.

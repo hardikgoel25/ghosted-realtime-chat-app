@@ -114,6 +114,7 @@ describe("security headers", () => {
         .find((d) => d.startsWith(name + " "));
     expect(directive("img-src")).toContain("https://res.cloudinary.com");
     expect(directive("media-src")).toContain("https://res.cloudinary.com");
+    expect(directive("connect-src")).toContain("https://res.cloudinary.com");
     expect(res.headers["x-frame-options"]).toBeDefined();
     expect(res.headers["x-request-id"]).toBeTruthy();
     expect(res.headers["x-powered-by"]).toBeUndefined();

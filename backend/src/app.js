@@ -58,7 +58,9 @@ export function createApp() {
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "blob:", CLOUDINARY_HOST],
           mediaSrc: ["'self'", "blob:", CLOUDINARY_HOST],
-          connectSrc: ["'self'", "ws:", "wss:"],
+          // The service worker fetches chat media to cache it, and a worker is bound by the CSP
+          // of the response that delivered its script, so Cloudinary must be allowed here too
+          connectSrc: ["'self'", "ws:", "wss:", CLOUDINARY_HOST],
           fontSrc: ["'self'", "data:"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
