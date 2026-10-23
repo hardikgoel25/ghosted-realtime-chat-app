@@ -18,6 +18,8 @@ import * as tokens from "./token.service.js";
 import * as media from "./media.service.js";
 import * as mail from "./mail.service.js";
 import { leaveAllGroups } from "./group.service.js";
+import * as twoFactor from "./twoFactor.service.js";
+import { features } from "../config/features.js";
 import { broadcast, disconnectUserSockets } from "../sockets/emit.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -114,6 +116,8 @@ export async function signup({ fullname, username, password, gender }, meta) {
   return { user, ...session };
 }
 
+const needsSecondFactor = (user) => features.twoFactor && Boolean(user.twoFactor?.enabled);
+
 export async function login({ username, password }, meta) {
   const user = await verifyCredentials(username, password);
   if (user.status === USER_STATUS.DISABLED) {
@@ -122,6 +126,47 @@ export async function login({ username, password }, meta) {
       ERROR_CODES.ACCOUNT_DISABLED
     );
   }
+  if (needsSecondFactor(user)) {
+    return { user, twoFactorRequired: true, challenge: twoFactor.issueChallenge(user, "login") };
+  }
+  const session = await tokens.createSession({ userId: user._id, ...meta });
+  return { user, ...session };
+}
+
+/**
+ * Second step of a two-factor sign-in: the challenge proves the password was already checked,
+ * the code proves possession of the authenticator (or a recovery code). Failures count towards
+ * the same lockout as wrong passwords.
+ */
+export async function completeTwoFactor(challengeToken, code, meta) {
+  const challenge = twoFactor.readChallenge(challengeToken);
+  const user = await User.findById(challenge.userId).select(twoFactor.SECRET_FIELDS);
+  if (!user || user.status === USER_STATUS.DELETED) throw ApiError.unauthorized();
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const minutes = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000));
+    throw ApiError.tooMany(
+      `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      ERROR_CODES.ACCOUNT_LOCKED
+    );
+  }
+  if (!(await twoFactor.verifyAnyCode(user, code))) {
+    await registerFailedLogin(user);
+    throw ApiError.unauthorized("That code is not right", ERROR_CODES.TWO_FACTOR_INVALID);
+  }
+  twoFactor.consumeChallenge(challenge);
+  const $set = { failedLoginCount: 0, lockedUntil: null };
+  if (user.status === USER_STATUS.DISABLED) {
+    if (challenge.intent !== "enable") {
+      throw ApiError.forbidden(
+        "Your account is disabled. Enable it to continue.",
+        ERROR_CODES.ACCOUNT_DISABLED
+      );
+    }
+    $set.status = USER_STATUS.ACTIVE;
+    user.status = USER_STATUS.ACTIVE;
+    logger.info({ userId: String(user._id) }, "Account re-enabled");
+  }
+  await User.updateOne({ _id: user._id }, { $set });
   const session = await tokens.createSession({ userId: user._id, ...meta });
   return { user, ...session };
 }
@@ -176,6 +221,9 @@ async function assertPassword(user, password) {
 
 export async function enableAccount({ username, password }, meta) {
   const user = await verifyCredentials(username, password);
+  if (needsSecondFactor(user)) {
+    return { user, twoFactorRequired: true, challenge: twoFactor.issueChallenge(user, "enable") };
+  }
   if (user.status === USER_STATUS.DISABLED) {
     user.status = USER_STATUS.ACTIVE;
     await user.save();

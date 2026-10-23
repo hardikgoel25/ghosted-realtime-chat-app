@@ -65,6 +65,7 @@ const NO_REFRESH_PATHS = [
   "/auth/login",
   "/auth/signup",
   "/auth/enable",
+  "/auth/2fa/verify",
   "/auth/logout",
 ];
 

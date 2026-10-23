@@ -1,5 +1,7 @@
 import * as authService from "../services/auth.service.js";
 import * as tokens from "../services/token.service.js";
+import * as twoFactor from "../services/twoFactor.service.js";
+import User from "../models/user.model.js";
 import { disconnectSessionSockets } from "../sockets/emit.js";
 import { SOCKET_EVENTS } from "@ghosted/shared";
 import { ApiError } from "../utils/ApiError.js";
@@ -14,10 +16,17 @@ import {
 
 const meta = (req) => ({ userAgent: req.get("user-agent") ?? "", ip: req.ip ?? "" });
 
-function sendAuthenticated(res, status, { user, accessToken, refreshToken }) {
+function sendAuthenticated(res, status, result) {
+  // Two-factor accounts get a challenge instead of cookies; the code step finishes the sign-in
+  if (result.twoFactorRequired) {
+    return ok(res, { twoFactorRequired: true, challenge: result.challenge }, status);
+  }
+  const { user, accessToken, refreshToken } = result;
   setAuthCookies(res, { accessToken, refreshToken, maxAgeMs: tokens.refreshTtlMs() });
   return ok(res, { user: serializeUser(user, { self: true }) }, status);
 }
+
+const selfView = async (userId) => serializeUser(await User.findById(userId), { self: true });
 
 export async function signup(req, res) {
   const result = await authService.signup(req.validated.body, meta(req));
@@ -95,6 +104,37 @@ export async function revokeSession(req, res) {
   });
   if (id === req.sessionId) clearAuthCookies(res);
   ok(res, { message: "Session revoked" });
+}
+
+// ---- two-factor authentication ----
+
+export async function verifyTwoFactor(req, res) {
+  const { challenge, code } = req.validated.body;
+  const result = await authService.completeTwoFactor(challenge, code, meta(req));
+  sendAuthenticated(res, 200, result);
+}
+
+export async function twoFactorSetup(req, res) {
+  ok(res, await twoFactor.startSetup(req.user, req.validated.body.password));
+}
+
+export async function twoFactorEnable(req, res) {
+  const recoveryCodes = await twoFactor.enable(req.user, req.validated.body.code);
+  ok(res, { recoveryCodes, user: await selfView(req.user._id) });
+}
+
+export async function twoFactorDisable(req, res) {
+  const { password, code } = req.validated.body;
+  await twoFactor.disable(req.user, password, code);
+  ok(res, { user: await selfView(req.user._id) });
+}
+
+export async function twoFactorRecoveryCodes(req, res) {
+  const recoveryCodes = await twoFactor.regenerateRecoveryCodes(
+    req.user,
+    req.validated.body.password
+  );
+  ok(res, { recoveryCodes });
 }
 
 // ---- email flows ----

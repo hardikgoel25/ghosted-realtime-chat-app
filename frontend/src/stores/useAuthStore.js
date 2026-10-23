@@ -18,10 +18,12 @@ export const useAuthStore = create((set, get) => ({
   isDeletingAccount: false,
   /** Username whose login was refused because the account is disabled */
   disabledUsername: null,
+  /** Pending second step of a two-factor sign-in: { challenge, intent: "login" | "enable" } */
+  twoFactorChallenge: null,
   onlineUsers: [],
   /** userId -> ISO date from presence updates (null when the user hides it) */
   lastSeen: {},
-  /** Server capability flags (email, media) from GET /config */
+  /** Server capability flags (email, media, features) from GET /config */
   config: null,
   /** Users I have blocked */
   blocked: [],
@@ -31,7 +33,7 @@ export const useAuthStore = create((set, get) => ({
       const config = await api.get("/config", { silent: true });
       set({ config });
     } catch {
-      set({ config: { emailEnabled: false, mediaEnabled: true } });
+      set({ config: { emailEnabled: false, mediaEnabled: true, features: {} } });
     }
   },
 
@@ -63,10 +65,14 @@ export const useAuthStore = create((set, get) => ({
   },
 
   login: async (data) => {
-    set({ isLoggingIn: true, disabledUsername: null });
+    set({ isLoggingIn: true, disabledUsername: null, twoFactorChallenge: null });
     try {
-      const { user } = await api.post("/auth/login", data, { silent: true });
-      set({ authUser: user });
+      const result = await api.post("/auth/login", data, { silent: true });
+      if (result.twoFactorRequired) {
+        set({ twoFactorChallenge: { challenge: result.challenge, intent: "login" } });
+        return { ok: false, twoFactorRequired: true };
+      }
+      set({ authUser: result.user });
       get().fetchBlocked();
       return { ok: true };
     } catch (err) {
@@ -78,11 +84,43 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  enableAccount: async (data) => {
-    set({ isEnablingAccount: true });
+  /** Second step of a two-factor sign-in (TOTP or recovery code). */
+  verifyTwoFactor: async (code) => {
+    const pending = get().twoFactorChallenge;
+    if (!pending) return { ok: false };
+    set({ isLoggingIn: true });
     try {
-      const { user } = await api.post("/auth/enable", data);
-      set({ authUser: user, disabledUsername: null });
+      const { user } = await api.post(
+        "/auth/2fa/verify",
+        { challenge: pending.challenge, code },
+        { silent: true }
+      );
+      set({ authUser: user, twoFactorChallenge: null, disabledUsername: null });
+      get().fetchBlocked();
+      if (pending.intent === "enable") toast.success("Welcome back! Your account is active again.");
+      return { ok: true };
+    } catch (err) {
+      // An expired challenge sends the user back to the password step
+      if (err.status === 401 && err.code !== ERROR_CODES.TWO_FACTOR_INVALID) {
+        set({ twoFactorChallenge: null });
+      }
+      toast.error(err.message);
+      return { ok: false, error: err };
+    } finally {
+      set({ isLoggingIn: false });
+    }
+  },
+  cancelTwoFactor: () => set({ twoFactorChallenge: null }),
+
+  enableAccount: async (data) => {
+    set({ isEnablingAccount: true, twoFactorChallenge: null });
+    try {
+      const result = await api.post("/auth/enable", data);
+      if (result.twoFactorRequired) {
+        set({ twoFactorChallenge: { challenge: result.challenge, intent: "enable" } });
+        return false;
+      }
+      set({ authUser: result.user, disabledUsername: null });
       toast.success("Welcome back! Your account is active again.");
       get().fetchBlocked();
       return true;
@@ -234,6 +272,42 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ---- two-factor authentication (settings) ----
+  twoFactorSetup: async (password) => {
+    try {
+      return await api.post("/auth/2fa/setup", { password });
+    } catch {
+      return null;
+    }
+  },
+  twoFactorEnable: async (code) => {
+    try {
+      const { user, recoveryCodes } = await api.post("/auth/2fa/enable", { code });
+      set({ authUser: user });
+      return recoveryCodes;
+    } catch {
+      return null;
+    }
+  },
+  twoFactorDisable: async (password, code) => {
+    try {
+      const { user } = await api.post("/auth/2fa/disable", { password, code });
+      set({ authUser: user });
+      toast.success("Two-factor authentication turned off");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  twoFactorRecoveryCodes: async (password) => {
+    try {
+      const { recoveryCodes } = await api.post("/auth/2fa/recovery-codes", { password });
+      return recoveryCodes;
+    } catch {
+      return null;
+    }
+  },
+
   // ---- email ----
   updateEmail: async (email) => {
     try {
@@ -352,7 +426,14 @@ export const useAuthStore = create((set, get) => ({
 
   clearSession: () => {
     disconnectSocket();
-    set({ authUser: null, onlineUsers: [], lastSeen: {}, disabledUsername: null, blocked: [] });
+    set({
+      authUser: null,
+      onlineUsers: [],
+      lastSeen: {},
+      disabledUsername: null,
+      twoFactorChallenge: null,
+      blocked: [],
+    });
     useConversationStore.getState().reset();
     useMessageStore.getState().reset();
     useUIStore.getState().setActiveConversation(null);

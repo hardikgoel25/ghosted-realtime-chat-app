@@ -4,12 +4,14 @@ import { Loader2, Lock, User } from "lucide-react";
 import { useAuthStore } from "../../stores/useAuthStore";
 import AuthLayout from "./AuthLayout";
 import Field from "./Field";
+import TwoFactorStep from "./TwoFactorStep";
 import { usePasswordToggle } from "./usePasswordToggle";
 
 export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const isLoggingIn = useAuthStore((s) => s.isLoggingIn);
   const disabledUsername = useAuthStore((s) => s.disabledUsername);
+  const twoFactorChallenge = useAuthStore((s) => s.twoFactorChallenge);
   const emailEnabled = useAuthStore((s) => s.config?.emailEnabled);
   const [form, setForm] = useState({ username: "", password: "" });
   const [passwordType, passwordToggle] = usePasswordToggle();
@@ -18,6 +20,14 @@ export default function LoginPage() {
     e.preventDefault();
     login({ username: form.username.trim(), password: form.password });
   };
+
+  if (twoFactorChallenge?.intent === "login") {
+    return (
+      <AuthLayout title="Two-factor check" subtitle="One more step to keep your account safe.">
+        <TwoFactorStep />
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

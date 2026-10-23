@@ -54,6 +54,15 @@ const userSchema = new Schema(
       desktop: { type: Boolean, default: false },
       preview: { type: Boolean, default: true },
     },
+    twoFactor: {
+      enabled: { type: Boolean, default: false },
+      enabledAt: { type: Date, default: null },
+      // Encrypted TOTP secret; never selected unless asked for explicitly (see twoFactor.service)
+      secret: { type: String, default: null, select: false },
+      pendingSecret: { type: String, default: null, select: false },
+      // SHA-256 hashes of unused recovery codes
+      recoveryCodes: { type: [String], default: [], select: false },
+    },
     failedLoginCount: { type: Number, default: 0 },
     lockedUntil: { type: Date, default: null },
     passwordChangedAt: { type: Date, default: null },
@@ -68,6 +77,7 @@ userSchema.set("toJSON", {
     delete ret.passwordHash;
     delete ret.failedLoginCount;
     delete ret.lockedUntil;
+    if (ret.twoFactor) ret.twoFactor = { enabled: Boolean(ret.twoFactor.enabled) };
     delete ret.__v;
     return ret;
   },

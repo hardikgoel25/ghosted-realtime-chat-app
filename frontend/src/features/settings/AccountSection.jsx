@@ -7,6 +7,7 @@ import { relativeTime } from "../../lib/format";
 import { usePasswordToggle } from "../auth/usePasswordToggle";
 import Dialog from "../../components/ui/Dialog";
 import Spinner from "../../components/ui/Spinner";
+import TwoFactorCard from "./TwoFactorCard";
 
 function describeAgent(ua = "") {
   const mobile = /Mobile|Android|iPhone|iPad/i.test(ua);
@@ -305,6 +306,7 @@ export default function AccountSection() {
   return (
     <div className="space-y-6">
       <ChangePassword />
+      <TwoFactorCard />
       <SessionsList />
       <DangerZone />
     </div>
