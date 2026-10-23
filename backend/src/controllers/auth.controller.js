@@ -1,6 +1,7 @@
 import * as authService from "../services/auth.service.js";
 import * as tokens from "../services/token.service.js";
 import * as twoFactor from "../services/twoFactor.service.js";
+import * as push from "../services/push.service.js";
 import User from "../models/user.model.js";
 import { disconnectSessionSockets } from "../sockets/emit.js";
 import { SOCKET_EVENTS } from "@ghosted/shared";
@@ -98,6 +99,7 @@ export async function revokeSession(req, res) {
   const sessions = await tokens.listActiveSessions(req.user._id);
   if (!sessions.some((s) => String(s._id) === id)) throw ApiError.notFound("Session not found");
   await tokens.revokeSession(id, "revoked_by_user");
+  await push.removeForSessions([id]);
   await disconnectSessionSockets(id, {
     event: SOCKET_EVENTS.SESSION_REVOKED,
     payload: { reason: "revoked_by_user" },

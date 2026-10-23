@@ -1,5 +1,5 @@
 import { Suspense, useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useThemeStore } from "../stores/useThemeStore";
@@ -8,6 +8,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import ErrorBoundary from "./ErrorBoundary";
 import SocketBridge from "./SocketBridge";
 import Spinner from "../components/ui/Spinner";
+import { onServiceWorkerNavigate } from "../lib/pwa";
 
 function useThemeEffect() {
   const resolved = useThemeStore((s) => s.resolved);
@@ -57,7 +58,13 @@ function useTitleBadge() {
   }, [unread]);
 }
 
+function useServiceWorkerNavigation() {
+  const navigate = useNavigate();
+  useEffect(() => onServiceWorkerNavigate((path) => navigate(path)), [navigate]);
+}
+
 export default function Root() {
+  useServiceWorkerNavigation();
   const checkAuth = useAuthStore((s) => s.checkAuth);
   const loadConfig = useAuthStore((s) => s.loadConfig);
   const isCheckingAuth = useAuthStore((s) => s.isCheckingAuth);

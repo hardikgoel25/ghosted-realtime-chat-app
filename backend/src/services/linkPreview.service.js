@@ -106,12 +106,17 @@ function isPublicV6(ip) {
   return (h0 & 0xe000) === 0x2000; // only global unicast 2000::/3
 }
 
-export function isPublicAddress(ip) {
-  if (env.LINK_PREVIEW_ALLOW_PRIVATE) return true;
+/** True for globally routable unicast addresses only (pure; used by the tests). */
+export function isPublicIp(ip) {
   const family = net.isIP(ip);
   if (family === 4) return isPublicV4(ip);
   if (family === 6) return isPublicV6(ip);
   return false;
+}
+
+export function isPublicAddress(ip) {
+  if (env.LINK_PREVIEW_ALLOW_PRIVATE) return true;
+  return isPublicIp(ip);
 }
 
 /** Resolves a hostname and returns one public address, or throws. */
@@ -131,7 +136,10 @@ export async function resolvePublicAddress(hostname) {
 function assertAllowedUrl(url) {
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("unsupported scheme");
   if (url.username || url.password) throw new Error("credentials in url");
-  if (url.port && url.port !== "80" && url.port !== "443") throw new Error("non-default port");
+  // Only the default ports in production; the dev/test flag also lifts this for fixtures
+  if (url.port && url.port !== "80" && url.port !== "443" && !env.LINK_PREVIEW_ALLOW_PRIVATE) {
+    throw new Error("non-default port");
+  }
 }
 
 /** One GET with the connection pinned to `address`; resolves with status, headers and body. */
@@ -153,7 +161,12 @@ function fetchOnce(url, address, { deadline }) {
           Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
           "Accept-Language": "en",
         },
-        lookup: (_host, _opts, cb) => cb(null, address.address, address.family),
+        // Pin the connection to the address that passed the check (no DNS rebinding). Node
+        // asks for all addresses when it may auto-select the family, hence both shapes.
+        lookup: (_host, opts, cb) =>
+          opts?.all
+            ? cb(null, [{ address: address.address, family: address.family }])
+            : cb(null, address.address, address.family),
         timeout: timeLeft,
       },
       (res) => {
@@ -256,7 +269,7 @@ export function deliverableImage(imageUrl) {
   }
 }
 
-async function fetchPreview(startUrl) {
+export async function fetchPreview(startUrl) {
   const deadline = Date.now() + LIMITS.LINK_PREVIEW_TIMEOUT_MS;
   let url = new URL(startUrl);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {

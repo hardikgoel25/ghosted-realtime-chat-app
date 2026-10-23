@@ -12,6 +12,7 @@ import Message from "../models/message.model.js";
 import Conversation from "../models/conversation.model.js";
 import Block from "../models/block.model.js";
 import EmailToken from "../models/emailToken.model.js";
+import PushSubscription from "../models/pushSubscription.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { initialsAvatar } from "../utils/avatar.js";
 import * as tokens from "./token.service.js";
@@ -19,6 +20,7 @@ import * as media from "./media.service.js";
 import * as mail from "./mail.service.js";
 import { leaveAllGroups } from "./group.service.js";
 import * as twoFactor from "./twoFactor.service.js";
+import * as push from "./push.service.js";
 import { features } from "../config/features.js";
 import { broadcast, disconnectUserSockets } from "../sockets/emit.js";
 
@@ -183,11 +185,14 @@ export async function refresh(refreshToken, meta) {
 }
 
 export async function logout({ sessionId }) {
-  if (sessionId) await tokens.revokeSession(sessionId, "logout");
+  if (!sessionId) return;
+  await tokens.revokeSession(sessionId, "logout");
+  await push.removeForSessions([sessionId]);
 }
 
 export async function logoutAll(userId) {
   await tokens.revokeAllSessions(userId, "logout_all");
+  await push.removeForUser(userId);
   await disconnectUserSockets(userId, {
     event: SOCKET_EVENTS.SESSION_REVOKED,
     payload: { reason: "logout_all" },
@@ -204,6 +209,7 @@ export async function changePassword(user, { currentPassword, newPassword }, { s
   withHash.passwordChangedAt = new Date();
   await withHash.save();
   await tokens.revokeAllSessions(user._id, "password_change", { exceptSessionId: sessionId });
+  await push.removeForUser(user._id, { exceptSessionId: sessionId });
   await disconnectUserSockets(user._id, {
     exceptSessionId: sessionId,
     event: SOCKET_EVENTS.SESSION_REVOKED,
@@ -238,6 +244,7 @@ export async function disableAccount(user, { password }) {
   doc.status = USER_STATUS.DISABLED;
   await doc.save();
   await tokens.revokeAllSessions(doc._id, "account_disabled");
+  await push.removeForUser(doc._id);
   await disconnectUserSockets(doc._id);
   broadcast(SOCKET_EVENTS.USER_DISABLED, { userId: String(doc._id) });
   logger.info({ userId: String(doc._id) }, "Account disabled");
@@ -277,6 +284,7 @@ export async function deleteAccount(user, { password }) {
     await Block.deleteMany({ $or: [{ blockerId: userId }, { blockedId: userId }] }, opts);
     await EmailToken.deleteMany({ userId }, opts);
     await Session.deleteMany({ userId }, opts);
+    await PushSubscription.deleteMany({ userId }, opts);
     await User.deleteOne({ _id: userId }, opts);
   });
 
@@ -406,6 +414,7 @@ export async function resetPassword(rawToken, password) {
   await user.save();
   await EmailToken.deleteMany({ userId: user._id, purpose: "reset" });
   await tokens.revokeAllSessions(user._id, "password_reset");
+  await push.removeForUser(user._id);
   await disconnectUserSockets(user._id, {
     event: SOCKET_EVENTS.SESSION_REVOKED,
     payload: { reason: "password_change" },

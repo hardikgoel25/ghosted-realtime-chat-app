@@ -5,6 +5,7 @@ import { SOCKET_EVENTS } from "@ghosted/shared";
 import { connectSocket, disconnectSocket } from "../lib/socket";
 import { playReceiveSound } from "../lib/sounds";
 import { showNotification } from "../lib/notifications";
+import { syncPushSubscription } from "../lib/push";
 import { messagePreview } from "../lib/utils";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useConversationStore } from "../stores/useConversationStore";
@@ -34,6 +35,7 @@ export default function SocketBridge() {
     const onConnect = async () => {
       ui().setSocketConnected(true);
       conversations().fetchList("all");
+      syncPushSubscription();
       messages().retryNetworkFailures();
       const activeId = ui().activeConversationId;
       if (activeId) {
@@ -94,6 +96,7 @@ export default function SocketBridge() {
           title,
           body,
           tag: conversationId,
+          url: `/c/${conversationId}`,
           onClick: () => navigate(`/c/${conversationId}`),
         });
       }

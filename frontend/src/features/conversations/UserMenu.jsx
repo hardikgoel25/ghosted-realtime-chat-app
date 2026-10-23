@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, Palette, Settings, User } from "lucide-react";
+import { Download, LogOut, Palette, Settings, User } from "lucide-react";
 import { useAuthStore } from "../../stores/useAuthStore";
+import { canInstall, onInstallAvailable, promptInstall } from "../../lib/pwa";
 import Avatar from "../../components/ui/Avatar";
 
 const closeMenu = () => document.activeElement?.blur?.();
@@ -8,6 +10,8 @@ const closeMenu = () => document.activeElement?.blur?.();
 export default function UserMenu({ user }) {
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
+  const [installable, setInstallable] = useState(canInstall());
+  useEffect(() => onInstallAvailable(setInstallable), []);
   if (!user) return null;
 
   return (
@@ -43,6 +47,19 @@ export default function UserMenu({ user }) {
             <Settings className="size-4" /> Settings
           </Link>
         </li>
+        {installable && (
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                closeMenu();
+                promptInstall();
+              }}
+            >
+              <Download className="size-4" /> Install app
+            </button>
+          </li>
+        )}
         <li>
           <button
             type="button"

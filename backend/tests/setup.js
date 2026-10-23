@@ -14,6 +14,12 @@ process.env.CLOUDINARY_API_SECRET = "";
 // Capture-only email transport so the email flows can be exercised without SMTP
 process.env.SMTP_URL = "json";
 process.env.APP_URL = "http://localhost:5173";
+// Throwaway VAPID pair so push code paths run (web-push itself is mocked where it matters)
+process.env.VAPID_PUBLIC_KEY =
+  "BPyLI3NJN1Gse4NOnwt2cRyczcW_djlaP4_QLEg8ntQTI6eu-LrCyzd5gafIabOfqtv51UBWqgOe_WKmz2P1PbA";
+process.env.VAPID_PRIVATE_KEY = "GknVr3NmQnZLxilnxfK-icKNGfkc_nD6rMpPmKjXGnA";
+// Link preview fixtures run on 127.0.0.1, which production would refuse
+process.env.LINK_PREVIEW_ALLOW_PRIVATE = "1";
 delete process.env.RATE_LIMIT_TEST;
 
 beforeAll(async () => {

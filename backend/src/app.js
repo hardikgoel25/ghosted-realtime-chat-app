@@ -90,7 +90,20 @@ export function createApp() {
   app.use("/api/v1", v1Routes);
 
   if (isProd) {
-    app.use(express.static(FRONTEND_DIST, { index: false, maxAge: "1y", immutable: true }));
+    app.use(
+      express.static(FRONTEND_DIST, {
+        index: false,
+        maxAge: "1y",
+        immutable: true,
+        // Hashed assets are immutable; the service worker and manifest must always be re-checked
+        setHeaders: (res, filePath) => {
+          const name = path.basename(filePath);
+          if (name === "sw.js" || name === "manifest.webmanifest") {
+            res.setHeader("Cache-Control", "no-cache");
+          }
+        },
+      })
+    );
     app.get(/^\/(?!api(\/|$)).*/, (_req, res) => {
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(FRONTEND_DIST, "index.html"));

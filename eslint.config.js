@@ -77,6 +77,11 @@ export default [
     },
   },
   {
+    // The service worker runs outside the window
+    files: ["frontend/src/sw.js"],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     files: ["frontend/src/**/*.test.js", "frontend/vite.config.js"],
     languageOptions: { globals: { ...globals.node, ...globals.vitest } },
   },

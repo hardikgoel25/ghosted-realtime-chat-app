@@ -8,6 +8,7 @@ import * as media from "./media.service.js";
 import * as presence from "./presence.service.js";
 import * as blocks from "./block.service.js";
 import { extractFirstUrl, schedulePreview } from "./linkPreview.service.js";
+import { notifyNewMessage } from "./notification.service.js";
 import {
   activeParticipants,
   broadcastConversation,
@@ -301,6 +302,8 @@ export async function sendMessage(me, conversationId, body, files = {}) {
     message: payload,
   });
   broadcastConversation(updated);
+
+  void notifyNewMessage(updated, doc, { onlineIds }).catch(() => {});
 
   schedulePreview(doc, (fresh) =>
     emitToParticipants(updated, SOCKET_EVENTS.MESSAGE_UPDATED, {
